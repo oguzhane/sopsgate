@@ -1,0 +1,3 @@
+[submodule "third_party/sops"]
+	path = third_party/sops
+	url = https://github.com/getsops/sops.git

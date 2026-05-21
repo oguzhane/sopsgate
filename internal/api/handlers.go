@@ -1,0 +1,330 @@
+// Package api implements the HTTP handlers and routing for sopsgate.
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	"github.com/oergin/sopsgate/internal/model"
+	"github.com/oergin/sopsgate/internal/service"
+)
+
+// Handler holds the HTTP handlers and their dependencies.
+type Handler struct {
+	svc *service.SecretsService
+}
+
+// NewHandler creates a new Handler.
+func NewHandler(svc *service.SecretsService) *Handler {
+	return &Handler{svc: svc}
+}
+
+// NewRouter creates the HTTP router with all routes.
+// Because namespaces can contain slashes (e.g., "infra/postgres"),
+// we use catch-all wildcards and parse the path segments manually.
+func NewRouter(h *Handler, auth Authenticator) http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /api/v1/namespaces", h.ListNamespaces)
+	mux.HandleFunc("POST /api/v1/namespaces/{rest...}", h.CreateNamespace)
+	mux.HandleFunc("DELETE /api/v1/namespaces/{rest...}", h.DeleteNamespace)
+
+	// Secrets: catch-all, then dispatch based on path structure.
+	mux.HandleFunc("GET /api/v1/secrets/{rest...}", h.handleGetSecrets)
+	mux.HandleFunc("PUT /api/v1/secrets/{rest...}", h.handlePutSecrets)
+	mux.HandleFunc("DELETE /api/v1/secrets/{rest...}", h.handleDeleteSecrets)
+
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	if auth != nil {
+		return AuthMiddleware(auth)(mux)
+	}
+	return mux
+}
+
+// parseSecretsPath parses the rest of the path after /api/v1/secrets/.
+// Patterns:
+//   {ns}/keys/{key}/versions/{version}  → ns, key, version
+//   {ns}/keys/{key}/versions            → ns, key, "versions"
+//   {ns}/keys/{key}                     → ns, key, ""
+//   {ns}                                → ns, "", "" (list/bulk)
+//
+// The namespace can contain slashes (e.g., "infra/postgres").
+// We look for "/keys/" as the delimiter between namespace and key.
+func parseSecretsPath(rest string) (ns, key, extra string) {
+	rest = strings.TrimSuffix(rest, "/")
+
+	keysIdx := strings.Index(rest, "/keys/")
+	if keysIdx == -1 {
+		// No /keys/ → the entire rest is the namespace.
+		return rest, "", ""
+	}
+
+	ns = rest[:keysIdx]
+	afterKeys := rest[keysIdx+6:] // after "/keys/"
+
+	// afterKeys could be:
+	//   "mykey"
+	//   "mykey/versions"
+	//   "mykey/versions/abc1234"
+	versionsIdx := strings.Index(afterKeys, "/versions")
+	if versionsIdx == -1 {
+		return ns, afterKeys, ""
+	}
+
+	key = afterKeys[:versionsIdx]
+	afterVersions := afterKeys[versionsIdx+9:] // after "/versions"
+	if afterVersions == "" || afterVersions == "/" {
+		return ns, key, "versions"
+	}
+	// Strip leading slash from version hash.
+	return ns, key, strings.TrimPrefix(afterVersions, "/")
+}
+
+// --- GET dispatcher ---
+
+func (h *Handler) handleGetSecrets(w http.ResponseWriter, r *http.Request) {
+	rest := r.PathValue("rest")
+	ns, key, extra := parseSecretsPath(rest)
+
+	switch {
+	case key == "" && extra == "":
+		// GET /api/v1/secrets/{ns}[?reveal=true]
+		h.ListOrGetSecrets(w, r, ns)
+	case key != "" && extra == "":
+		// GET /api/v1/secrets/{ns}/keys/{key}
+		h.GetSecret(w, r, ns, key)
+	case key != "" && extra == "versions":
+		// GET /api/v1/secrets/{ns}/keys/{key}/versions
+		h.GetVersions(w, r, ns, key)
+	case key != "" && extra != "":
+		// GET /api/v1/secrets/{ns}/keys/{key}/versions/{version}
+		h.GetSecretAtVersion(w, r, ns, key, extra)
+	default:
+		writeError(w, http.StatusBadRequest, "invalid path")
+	}
+}
+
+// --- PUT dispatcher ---
+
+func (h *Handler) handlePutSecrets(w http.ResponseWriter, r *http.Request) {
+	rest := r.PathValue("rest")
+	ns, key, _ := parseSecretsPath(rest)
+
+	if key == "" {
+		h.BulkPutSecrets(w, r, ns)
+	} else {
+		h.PutSecret(w, r, ns, key)
+	}
+}
+
+// --- DELETE dispatcher ---
+
+func (h *Handler) handleDeleteSecrets(w http.ResponseWriter, r *http.Request) {
+	rest := r.PathValue("rest")
+	ns, key, _ := parseSecretsPath(rest)
+
+	if key == "" {
+		writeError(w, http.StatusBadRequest, "key is required for DELETE")
+		return
+	}
+	h.DeleteSecret(w, r, ns, key)
+}
+
+// --- Namespace Handlers ---
+
+func (h *Handler) ListNamespaces(w http.ResponseWriter, r *http.Request) {
+	namespaces, err := h.svc.ListNamespaces()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, model.NamespacesResponse{Namespaces: namespaces})
+}
+
+func (h *Handler) CreateNamespace(w http.ResponseWriter, r *http.Request) {
+	ns := strings.TrimSuffix(r.PathValue("rest"), "/")
+	author := identityFromContext(r)
+
+	if err := h.svc.CreateNamespace(ns, author); err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (h *Handler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
+	ns := strings.TrimSuffix(r.PathValue("rest"), "/")
+	author := identityFromContext(r)
+
+	if err := h.svc.DeleteNamespace(ns, author); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// --- Secret Handlers ---
+
+func (h *Handler) GetSecret(w http.ResponseWriter, r *http.Request, ns, key string) {
+	secret, err := h.svc.GetSecret(ns, key)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, secret)
+}
+
+func (h *Handler) PutSecret(w http.ResponseWriter, r *http.Request, ns, key string) {
+	author := identityFromContext(r)
+
+	var req model.PutSecretRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Value == "" {
+		writeError(w, http.StatusBadRequest, "value is required")
+		return
+	}
+
+	if err := h.svc.PutSecret(ns, key, req.Value, author); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) DeleteSecret(w http.ResponseWriter, r *http.Request, ns, key string) {
+	author := identityFromContext(r)
+
+	if err := h.svc.DeleteSecret(ns, key, author); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) ListOrGetSecrets(w http.ResponseWriter, r *http.Request, ns string) {
+	reveal := r.URL.Query().Get("reveal") == "true"
+
+	if reveal {
+		secrets, err := h.svc.GetAllSecrets(ns)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, model.BulkGetResponse{Namespace: ns, Secrets: secrets})
+		return
+	}
+
+	keys, err := h.svc.ListKeys(ns)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, model.ListKeysResponse{Namespace: ns, Keys: keys})
+}
+
+func (h *Handler) BulkPutSecrets(w http.ResponseWriter, r *http.Request, ns string) {
+	author := identityFromContext(r)
+
+	var req model.BulkPutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Secrets) == 0 {
+		writeError(w, http.StatusBadRequest, "secrets map is required")
+		return
+	}
+
+	if err := h.svc.BulkPutSecrets(ns, req.Secrets, author); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) GetVersions(w http.ResponseWriter, r *http.Request, ns, key string) {
+	versions, err := h.svc.GetVersions(ns, key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, model.VersionsResponse{Namespace: ns, Key: key, Versions: versions})
+}
+
+func (h *Handler) GetSecretAtVersion(w http.ResponseWriter, r *http.Request, ns, key, version string) {
+	secret, err := h.svc.GetSecretAtVersion(ns, key, version)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, secret)
+}
+
+// --- Helpers ---
+
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(model.ErrorResponse{Error: http.StatusText(status), Message: message})
+}
+
+type contextKey string
+
+const identityKey contextKey = "identity"
+
+func identityFromContext(r *http.Request) string {
+	if id, ok := r.Context().Value(identityKey).(*model.Identity); ok {
+		return id.Name
+	}
+	return "anonymous"
+}

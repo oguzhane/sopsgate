@@ -1,0 +1,25 @@
+# Binaries
+sopsgate
+*.exe
+
+# Config and keys (never commit these)
+config.yaml
+*.key
+*.pem
+
+# Secrets repo (runtime data)
+secrets-repo/
+data/
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
