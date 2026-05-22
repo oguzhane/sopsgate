@@ -1,15 +1,10 @@
-name: Local
+name: local
 variables:
   - name: baseUrl
     value: http://localhost:8080
-    enabled: true
-  - name: token
-    value: your-bearer-token-here
-    enabled: true
-    secret: true
+  - secret: true
+    name: token
   - name: namespace
     value: myapp
-    enabled: true
   - name: key
     value: db_password
-    enabled: true

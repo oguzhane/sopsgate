@@ -1,3 +1,17 @@
-name: SopsGate API
-version: "1"
-type: collection
+opencollection: 1.0.0
+
+info:
+  name: sopsgate
+config:
+  proxy:
+    inherit: true
+    config:
+      protocol: http
+      hostname: ""
+      port: ""
+      auth:
+        username: ""
+        password: ""
+      bypassProxy: ""
+bundled: false
+extensions: {}

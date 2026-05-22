@@ -8,4 +8,15 @@ http:
   url: "{{baseUrl}}/api/v1/secrets/{{namespace}}/keys/{{key}}/versions/{{version}}"
   headers:
     - name: Authorization
-      value: "Bearer {{token}}"
+      value: Bearer {{token}}
+
+runtime:
+  variables:
+    - name: version
+      value: 595a5f7
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
