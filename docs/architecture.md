@@ -69,6 +69,24 @@ secrets-repo/
 6. GitStore commits (global git lock)
 7. Release namespace lock
 
+## Security Invariant: No Plaintext on Disk
+
+**Plaintext secret values must NEVER be written to disk.** This is a non-negotiable constraint.
+
+All decryption happens in memory. The only data written to the filesystem is SOPS-encrypted ciphertext. The flow is:
+
+```
+disk (ciphertext) → memory (decrypt) → memory (mutate) → memory (re-encrypt) → disk (ciphertext)
+```
+
+Key code enforcing this:
+
+- `SOPSEngine.SetSecret()` (`store/sops.go`) — decrypts to `map[string]string` in memory, updates the key, re-encrypts, returns ciphertext `[]byte`. Plaintext exists only as Go variables.
+- `SOPSEngine.EncryptMap()` (`store/sops.go`) — takes a plaintext map, returns encrypted bytes. Never writes to disk.
+- `GitStore.WriteFile()` (`store/git.go`) — receives already-encrypted `[]byte` from the service layer. No intermediate plaintext file is ever created.
+
+**Any future changes must preserve this invariant.** Never introduce temporary files, debug logging of secret values, or serialization of decrypted data to disk.
+
 ## Concurrency
 
 - **Per-namespace mutex** in service layer — serializes writes to the same SOPS file

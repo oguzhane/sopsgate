@@ -26,6 +26,7 @@ docs/                       # Documentation (architecture, API reference, config
 - **age encryption** — SOPS age key file path set via `os.Setenv("SOPS_AGE_KEY_FILE", ...)` because SOPS keyservice internally calls `MasterKey.Decrypt()` which reads from env
 - **go-git** for all git operations — no shelling out to git CLI
 - **Two-level locking**: per-namespace mutex in service layer + global mutex in GitStore for commit serialization
+- **CRITICAL — No plaintext on disk**: Decrypted secret values must NEVER be written to the filesystem. All decryption happens in memory (`map[string]string`), mutations happen in memory, and only SOPS-encrypted ciphertext is written to disk via `GitStore.WriteFile()`. Never introduce temp files, debug logging of values, or any code path that serializes plaintext secrets to disk. See `docs/architecture.md` for the full invariant.
 
 ## Building and Running
 
