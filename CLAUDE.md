@@ -64,3 +64,13 @@ Base path: `/api/v1`. Bearer token auth on all routes except `/healthz`.
 - `GET /secrets/{ns}/keys/{key}/versions/{hash}` — secret at version
 - `GET /secrets/{ns}?reveal=true` — bulk get all secrets
 - `PUT /secrets/{ns}` — bulk put secrets
+
+## Documentation
+
+See the [`docs/`](docs/) folder for detailed documentation:
+
+- [Getting Started](docs/getting-started.md) — setup and first steps
+- [Configuration](docs/configuration.md) — config file reference
+- [API Reference](docs/api-reference.md) — full endpoint documentation
+- [Architecture](docs/architecture.md) — design and internals
+- [Deployment](docs/deployment.md) — production deployment guide
