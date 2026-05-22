@@ -81,11 +81,20 @@ disk (ciphertext) → memory (decrypt) → memory (mutate) → memory (re-encryp
 
 Key code enforcing this:
 
-- `SOPSEngine.SetSecret()` (`store/sops.go`) — decrypts to `map[string]string` in memory, updates the key, re-encrypts, returns ciphertext `[]byte`. Plaintext exists only as Go variables.
+- `SOPSEngine.SetSecret()` (`store/sops.go`) — decrypts to `map[string][]byte` in memory, updates the key, re-encrypts, returns ciphertext `[]byte`. Plaintext exists only as Go variables.
 - `SOPSEngine.EncryptMap()` (`store/sops.go`) — takes a plaintext map, returns encrypted bytes. Never writes to disk.
 - `GitStore.WriteFile()` (`store/git.go`) — receives already-encrypted `[]byte` from the service layer. No intermediate plaintext file is ever created.
 
 **Any future changes must preserve this invariant.** Never introduce temporary files, debug logging of secret values, or serialization of decrypted data to disk.
+
+### Memory Zeroing
+
+Plaintext secret values are stored as `[]byte` (not Go `string`) throughout the internal data path. This allows deterministic zeroing of memory after use — defense against memory dump attacks (cold boot, hypervisor inspection, `/proc/pid/mem`).
+
+- `ZeroBytes(b []byte)` — overwrites every byte with zero
+- `ZeroSecretMap(m map[string][]byte)` — zeros all value slices and clears the map
+
+Every function that decrypts secrets uses `defer ZeroSecretMap(secrets)` or `defer ZeroBytes(dataKey)` to clean up. String conversion (`string([]byte)`) happens only at the HTTP response boundary in the handler/service layer, keeping the plaintext window as short as possible.
 
 ## Concurrency
 

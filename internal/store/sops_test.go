@@ -59,9 +59,9 @@ func TestSOPSEngine_EncryptDecryptRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	secrets := map[string]string{
-		"db_password": "super-secret",
-		"api_key":     "key-123",
+	secrets := map[string][]byte{
+		"db_password": []byte("super-secret"),
+		"api_key":     []byte("key-123"),
 	}
 
 	// Encrypt.
@@ -78,10 +78,10 @@ func TestSOPSEngine_EncryptDecryptRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decrypted["db_password"] != "super-secret" {
+	if string(decrypted["db_password"]) != "super-secret" {
 		t.Fatalf("expected 'super-secret', got %q", decrypted["db_password"])
 	}
-	if decrypted["api_key"] != "key-123" {
+	if string(decrypted["api_key"]) != "key-123" {
 		t.Fatalf("expected 'key-123', got %q", decrypted["api_key"])
 	}
 }
@@ -94,13 +94,13 @@ func TestSOPSEngine_SetSecret(t *testing.T) {
 	}
 
 	// Create initial file.
-	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil, nil)
+	encrypted, err := engine.EncryptMap(map[string][]byte{"key1": []byte("val1")}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Set a new key.
-	encrypted, err = engine.SetSecret(encrypted, "key2", "val2")
+	encrypted, err = engine.SetSecret(encrypted, "key2", []byte("val2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestSOPSEngine_SetSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if secrets["key1"] != "val1" || secrets["key2"] != "val2" {
+	if string(secrets["key1"]) != "val1" || string(secrets["key2"]) != "val2" {
 		t.Fatalf("unexpected secrets: %v", secrets)
 	}
 }
@@ -122,7 +122,7 @@ func TestSOPSEngine_DeleteSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1", "key2": "val2"}, nil, nil)
+	encrypted, err := engine.EncryptMap(map[string][]byte{"key1": []byte("val1"), "key2": []byte("val2")}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestSOPSEngine_DeleteSecret(t *testing.T) {
 	if _, ok := secrets["key1"]; ok {
 		t.Fatal("key1 should be deleted")
 	}
-	if secrets["key2"] != "val2" {
+	if string(secrets["key2"]) != "val2" {
 		t.Fatalf("key2 should still exist, got %v", secrets)
 	}
 }
@@ -151,7 +151,7 @@ func TestSOPSEngine_DeleteSecret_NotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil, nil)
+	encrypted, err := engine.EncryptMap(map[string][]byte{"key1": []byte("val1")}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestSOPSEngine_GetSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil, nil)
+	encrypted, err := engine.EncryptMap(map[string][]byte{"key1": []byte("val1")}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestSOPSEngine_GetSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if val != "val1" {
+	if string(val) != "val1" {
 		t.Fatalf("expected 'val1', got %q", val)
 	}
 
@@ -195,7 +195,7 @@ func TestSOPSEngine_ListKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.EncryptMap(map[string]string{"b_key": "v1", "a_key": "v2"}, nil, nil)
+	encrypted, err := engine.EncryptMap(map[string][]byte{"b_key": []byte("v1"), "a_key": []byte("v2")}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,13 +238,13 @@ func TestSOPSEngine_UpdateExistingFile(t *testing.T) {
 	}
 
 	// Create file.
-	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil, nil)
+	encrypted, err := engine.EncryptMap(map[string][]byte{"key1": []byte("val1")}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Update with new map (re-using existing encrypted metadata).
-	newSecrets := map[string]string{"key1": "updated", "key2": "new"}
+	newSecrets := map[string][]byte{"key1": []byte("updated"), "key2": []byte("new")}
 	encrypted, err = engine.EncryptMap(newSecrets, encrypted, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -254,7 +254,7 @@ func TestSOPSEngine_UpdateExistingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decrypted["key1"] != "updated" || decrypted["key2"] != "new" {
+	if string(decrypted["key1"]) != "updated" || string(decrypted["key2"]) != "new" {
 		t.Fatalf("unexpected: %v", decrypted)
 	}
 }
@@ -271,10 +271,10 @@ func TestSOPSEngine_NeverReturnsPlaintext(t *testing.T) {
 	}
 
 	// Use distinct, identifiable plaintext values that would be easy to spot in ciphertext.
-	plaintexts := map[string]string{
-		"db_password": "PLAINTEXT_PASSWORD_abc123",
-		"api_key":     "PLAINTEXT_APIKEY_xyz789",
-		"token":       "PLAINTEXT_TOKEN_secret42",
+	plaintexts := map[string][]byte{
+		"db_password": []byte("PLAINTEXT_PASSWORD_abc123"),
+		"api_key":     []byte("PLAINTEXT_APIKEY_xyz789"),
+		"token":       []byte("PLAINTEXT_TOKEN_secret42"),
 	}
 
 	assertNoCleartext := func(t *testing.T, label string, data []byte) {
@@ -294,27 +294,27 @@ func TestSOPSEngine_NeverReturnsPlaintext(t *testing.T) {
 	assertNoCleartext(t, "EncryptMap-new", encrypted)
 
 	// 2. EncryptMap (update existing) — output must be ciphertext only.
-	updated := map[string]string{
-		"db_password": "PLAINTEXT_UPDATED_newpass",
-		"api_key":     "PLAINTEXT_APIKEY_xyz789",
-		"token":       "PLAINTEXT_TOKEN_secret42",
+	updated := map[string][]byte{
+		"db_password": []byte("PLAINTEXT_UPDATED_newpass"),
+		"api_key":     []byte("PLAINTEXT_APIKEY_xyz789"),
+		"token":       []byte("PLAINTEXT_TOKEN_secret42"),
 	}
 	reencrypted, err := engine.EncryptMap(updated, encrypted, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertNoCleartext(t, "EncryptMap-update", reencrypted)
-	if bytes.Contains(reencrypted, []byte("PLAINTEXT_UPDATED_newpass")) {
+	if bytes.Contains(reencrypted, []byte([]byte("PLAINTEXT_UPDATED_newpass"))) {
 		t.Fatal("EncryptMap-update: updated plaintext found in output")
 	}
 
 	// 3. SetSecret — output must be ciphertext only.
-	afterSet, err := engine.SetSecret(encrypted, "new_key", "PLAINTEXT_NEWKEY_val999")
+	afterSet, err := engine.SetSecret(encrypted, "new_key", []byte("PLAINTEXT_NEWKEY_val999"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertNoCleartext(t, "SetSecret", afterSet)
-	if bytes.Contains(afterSet, []byte("PLAINTEXT_NEWKEY_val999")) {
+	if bytes.Contains(afterSet, []byte([]byte("PLAINTEXT_NEWKEY_val999"))) {
 		t.Fatal("SetSecret: new plaintext found in output")
 	}
 
@@ -337,7 +337,7 @@ func TestSOPSEngine_NeverReturnsPlaintext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decrypted["new_key"] != "PLAINTEXT_NEWKEY_val999" {
+	if string(decrypted["new_key"]) != "PLAINTEXT_NEWKEY_val999" {
 		t.Fatalf("expected new_key value after decrypt, got %q", decrypted["new_key"])
 	}
 }
@@ -351,7 +351,7 @@ func TestSOPSEngine_MultipleIdentities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encrypted, err := engineA.EncryptMap(map[string]string{"secret": "multi-key-test"}, nil, nil)
+	encrypted, err := engineA.EncryptMap(map[string][]byte{"secret": []byte("multi-key-test")}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestSOPSEngine_MultipleIdentities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if secrets["secret"] != "multi-key-test" {
+	if string(secrets["secret"]) != "multi-key-test" {
 		t.Fatalf("expected 'multi-key-test', got %q", secrets["secret"])
 	}
 
@@ -479,7 +479,7 @@ func TestSOPSEngine_DecryptCorruptData(t *testing.T) {
 	}
 
 	// Truncated SOPS file — starts valid but incomplete
-	encrypted, _ := engine.EncryptMap(map[string]string{"k": "v"}, nil, nil)
+	encrypted, _ := engine.EncryptMap(map[string][]byte{"k": []byte("v")}, nil, nil)
 	truncated := encrypted[:len(encrypted)/2]
 	_, err = engine.DecryptFile(truncated)
 	if err == nil {
@@ -494,12 +494,12 @@ func TestSOPSEngine_SetSecret_OverwriteExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.EncryptMap(map[string]string{"k": "original"}, nil, nil)
+	encrypted, err := engine.EncryptMap(map[string][]byte{"k": []byte("original")}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	encrypted, err = engine.SetSecret(encrypted, "k", "overwritten")
+	encrypted, err = engine.SetSecret(encrypted, "k", []byte("overwritten"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +508,7 @@ func TestSOPSEngine_SetSecret_OverwriteExisting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if val != "overwritten" {
+	if string(val) != "overwritten" {
 		t.Fatalf("expected 'overwritten', got %q", val)
 	}
 }

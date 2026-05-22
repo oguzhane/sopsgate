@@ -27,7 +27,8 @@ docs/                       # Documentation (architecture, API reference, config
 - **Standard SOPS identity management** — SopsGate does NOT introduce its own identity config. Uses `.sops.yaml` creation rules from the secrets repo for encryption recipients, and standard SOPS env vars for key files. Existing SOPS-encrypted files can be served without re-encryption
 - **go-git** for all git operations — no shelling out to git CLI
 - **Two-level locking**: per-namespace mutex in service layer + global mutex in GitStore for commit serialization
-- **CRITICAL — No plaintext on disk**: Decrypted secret values must NEVER be written to the filesystem. All decryption happens in memory (`map[string]string`), mutations happen in memory, and only SOPS-encrypted ciphertext is written to disk via `GitStore.WriteFile()`. Never introduce temp files, debug logging of values, or any code path that serializes plaintext secrets to disk. See `docs/architecture.md` for the full invariant.
+- **CRITICAL — No plaintext on disk**: Decrypted secret values must NEVER be written to the filesystem. All decryption happens in memory (`map[string][]byte`), mutations happen in memory, and only SOPS-encrypted ciphertext is written to disk via `GitStore.WriteFile()`. Never introduce temp files, debug logging of values, or any code path that serializes plaintext secrets to disk. See `docs/architecture.md` for the full invariant.
+- **Memory zeroing**: Plaintext values use `[]byte` (not `string`) throughout the internal data path so they can be deterministically zeroed after use via `ZeroBytes`/`ZeroSecretMap` in `internal/store/zeromem.go`. String conversion happens only at the HTTP response boundary. All decrypt sites use `defer ZeroSecretMap(secrets)` and `defer ZeroBytes(dataKey)`.
 
 ## Building and Running
 

@@ -140,7 +140,8 @@ func (e *SOPSEngine) applyIdentities(tree *sops.Tree) {
 }
 
 // DecryptFile decrypts a SOPS-encrypted YAML file and returns key-value pairs.
-func (e *SOPSEngine) DecryptFile(encrypted []byte) (map[string]string, error) {
+// Caller should defer ZeroSecretMap on the returned map when done.
+func (e *SOPSEngine) DecryptFile(encrypted []byte) (map[string][]byte, error) {
 	tree, err := e.store.LoadEncryptedFile(encrypted)
 	if err != nil {
 		return nil, fmt.Errorf("load encrypted file: %w", err)
@@ -152,6 +153,7 @@ func (e *SOPSEngine) DecryptFile(encrypted []byte) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get data key: %w", err)
 	}
+	defer ZeroBytes(dataKey)
 
 	if _, err := tree.Decrypt(dataKey, e.cipher); err != nil {
 		return nil, fmt.Errorf("decrypt: %w", err)
@@ -164,7 +166,7 @@ func (e *SOPSEngine) DecryptFile(encrypted []byte) (map[string]string, error) {
 // If existingEncrypted is non-nil, it updates the existing file (preserving metadata).
 // Otherwise creates a new encrypted file using the provided keyGroups.
 // If keyGroups is nil for a new file, falls back to the engine's own age recipients.
-func (e *SOPSEngine) EncryptMap(secrets map[string]string, existingEncrypted []byte, keyGroups []sops.KeyGroup) ([]byte, error) {
+func (e *SOPSEngine) EncryptMap(secrets map[string][]byte, existingEncrypted []byte, keyGroups []sops.KeyGroup) ([]byte, error) {
 	var tree sops.Tree
 
 	if existingEncrypted != nil {
@@ -180,6 +182,7 @@ func (e *SOPSEngine) EncryptMap(secrets map[string]string, existingEncrypted []b
 		if err != nil {
 			return nil, fmt.Errorf("get data key: %w", err)
 		}
+		defer ZeroBytes(dataKey)
 
 		if _, err := tree.Decrypt(dataKey, e.cipher); err != nil {
 			return nil, fmt.Errorf("decrypt for update: %w", err)
@@ -211,6 +214,7 @@ func (e *SOPSEngine) EncryptMap(secrets map[string]string, existingEncrypted []b
 		if len(errs) > 0 {
 			return nil, fmt.Errorf("generate data key: %v", errs)
 		}
+		defer ZeroBytes(dataKey)
 
 		mac, err := tree.Encrypt(dataKey, e.cipher)
 		if err != nil {
@@ -240,35 +244,35 @@ func (e *SOPSEngine) newAgeMasterKeys() sops.KeyGroup {
 	return kg
 }
 
-// treeToMap converts SOPS TreeBranches to a flat string map.
-func treeToMap(branches sops.TreeBranches) map[string]string {
-	result := make(map[string]string)
+// treeToMap converts SOPS TreeBranches to a flat map with []byte values.
+func treeToMap(branches sops.TreeBranches) map[string][]byte {
+	result := make(map[string][]byte)
 	for _, branch := range branches {
 		for _, item := range branch {
 			key, ok := item.Key.(string)
 			if !ok {
 				continue
 			}
-			result[key] = fmt.Sprintf("%v", item.Value)
+			result[key] = []byte(fmt.Sprintf("%v", item.Value))
 		}
 	}
 	return result
 }
 
-// mapToTreeBranches converts a string map to SOPS TreeBranches.
-func mapToTreeBranches(secrets map[string]string) sops.TreeBranches {
+// mapToTreeBranches converts a []byte map to SOPS TreeBranches.
+func mapToTreeBranches(secrets map[string][]byte) sops.TreeBranches {
 	var branch sops.TreeBranch
 	keys := sortedKeys(secrets)
 	for _, k := range keys {
 		branch = append(branch, sops.TreeItem{
 			Key:   k,
-			Value: secrets[k],
+			Value: string(secrets[k]),
 		})
 	}
 	return sops.TreeBranches{branch}
 }
 
-func sortedKeys(m map[string]string) []string {
+func sortedKeys(m map[string][]byte) []string {
 	ks := make([]string, 0, len(m))
 	for k := range m {
 		ks = append(ks, k)
@@ -284,15 +288,16 @@ func sortedKeys(m map[string]string) []string {
 // CreateEmptyEncryptedFile creates a new encrypted YAML file with no secrets.
 // keyGroups determines which recipients to use; nil falls back to engine defaults.
 func (e *SOPSEngine) CreateEmptyEncryptedFile(keyGroups []sops.KeyGroup) ([]byte, error) {
-	return e.EncryptMap(map[string]string{}, nil, keyGroups)
+	return e.EncryptMap(map[string][]byte{}, nil, keyGroups)
 }
 
 // SetSecret decrypts an existing file, sets/updates a key, and re-encrypts.
-func (e *SOPSEngine) SetSecret(encrypted []byte, key, value string) ([]byte, error) {
+func (e *SOPSEngine) SetSecret(encrypted []byte, key string, value []byte) ([]byte, error) {
 	secrets, err := e.DecryptFile(encrypted)
 	if err != nil {
 		return nil, err
 	}
+	defer ZeroSecretMap(secrets)
 	secrets[key] = value
 	return e.EncryptMap(secrets, encrypted, nil)
 }
@@ -303,6 +308,7 @@ func (e *SOPSEngine) DeleteSecret(encrypted []byte, key string) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
+	defer ZeroSecretMap(secrets)
 	if _, exists := secrets[key]; !exists {
 		return nil, fmt.Errorf("key %q not found", key)
 	}
@@ -311,14 +317,23 @@ func (e *SOPSEngine) DeleteSecret(encrypted []byte, key string) ([]byte, error) 
 }
 
 // GetSecret decrypts and returns a single secret value.
-func (e *SOPSEngine) GetSecret(encrypted []byte, key string) (string, error) {
+// Caller should defer ZeroBytes on the returned slice when done.
+func (e *SOPSEngine) GetSecret(encrypted []byte, key string) ([]byte, error) {
 	secrets, err := e.DecryptFile(encrypted)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	v, ok := secrets[key]
 	if !ok {
-		return "", fmt.Errorf("key %q not found", key)
+		ZeroSecretMap(secrets)
+		return nil, fmt.Errorf("key %q not found", key)
+	}
+	// Zero all values except the one we're returning.
+	for k, val := range secrets {
+		if k != key {
+			ZeroBytes(val)
+		}
+		delete(secrets, k)
 	}
 	return v, nil
 }
@@ -329,5 +344,6 @@ func (e *SOPSEngine) ListKeys(encrypted []byte) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer ZeroSecretMap(secrets)
 	return sortedKeys(secrets), nil
 }

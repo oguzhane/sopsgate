@@ -105,6 +105,9 @@ func (s *SecretsService) GetSecret(namespace, key string) (*model.Secret, error)
 	if err != nil {
 		return nil, err
 	}
+	// Convert []byte to string at the response boundary, then zero the slice.
+	strValue := string(value)
+	store.ZeroBytes(value)
 
 	// Get latest commit info for this namespace.
 	history, err := s.git.FileHistory(namespace)
@@ -115,7 +118,7 @@ func (s *SecretsService) GetSecret(namespace, key string) (*model.Secret, error)
 	secret := &model.Secret{
 		Namespace: namespace,
 		Key:       key,
-		Value:     value,
+		Value:     strValue,
 	}
 	if len(history) > 0 {
 		secret.Version = history[0].Hash
@@ -135,7 +138,8 @@ func (s *SecretsService) ListKeys(namespace string) ([]string, error) {
 }
 
 // GetAllSecrets returns all key-value pairs in a namespace.
-func (s *SecretsService) GetAllSecrets(namespace string) (map[string]string, error) {
+// Caller should defer store.ZeroSecretMap on the returned map when done.
+func (s *SecretsService) GetAllSecrets(namespace string) (map[string][]byte, error) {
 	data, err := s.git.ReadFile(namespace)
 	if err != nil {
 		return nil, fmt.Errorf("namespace %q not found", namespace)
@@ -154,7 +158,10 @@ func (s *SecretsService) PutSecret(namespace, key, value, author string) error {
 		return fmt.Errorf("namespace %q not found", namespace)
 	}
 
-	newData, err := s.sops.SetSecret(data, key, value)
+	valueBytes := []byte(value)
+	defer store.ZeroBytes(valueBytes)
+
+	newData, err := s.sops.SetSecret(data, key, valueBytes)
 	if err != nil {
 		return fmt.Errorf("set secret: %w", err)
 	}
@@ -182,9 +189,10 @@ func (s *SecretsService) BulkPutSecrets(namespace string, secrets map[string]str
 	if err != nil {
 		return fmt.Errorf("decrypt: %w", err)
 	}
+	defer store.ZeroSecretMap(existing)
 
 	for k, v := range secrets {
-		existing[k] = v
+		existing[k] = []byte(v)
 	}
 
 	newData, err := s.sops.EncryptMap(existing, data, nil)
@@ -259,11 +267,13 @@ func (s *SecretsService) GetSecretAtVersion(namespace, key, version string) (*mo
 	if err != nil {
 		return nil, err
 	}
+	strValue := string(value)
+	store.ZeroBytes(value)
 
 	return &model.Secret{
 		Namespace: namespace,
 		Key:       key,
-		Value:     value,
+		Value:     strValue,
 		Version:   version,
 	}, nil
 }

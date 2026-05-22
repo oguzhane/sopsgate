@@ -8,6 +8,7 @@ import (
 
 	"github.com/oguzhane/sopsgate/internal/model"
 	"github.com/oguzhane/sopsgate/internal/service"
+	"github.com/oguzhane/sopsgate/internal/store"
 )
 
 // Handler holds the HTTP handlers and their dependencies.
@@ -242,7 +243,13 @@ func (h *Handler) ListOrGetSecrets(w http.ResponseWriter, r *http.Request, ns st
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, model.BulkGetResponse{Namespace: ns, Secrets: secrets})
+		defer store.ZeroSecretMap(secrets)
+		// Convert []byte values to strings at the HTTP response boundary.
+		strSecrets := make(map[string]string, len(secrets))
+		for k, v := range secrets {
+			strSecrets[k] = string(v)
+		}
+		writeJSON(w, http.StatusOK, model.BulkGetResponse{Namespace: ns, Secrets: strSecrets})
 		return
 	}
 

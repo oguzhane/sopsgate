@@ -162,7 +162,7 @@ func TestSecretsService_GetAllSecrets(t *testing.T) {
 	if len(secrets) != 2 {
 		t.Fatalf("expected 2, got %d", len(secrets))
 	}
-	if secrets["k1"] != "v1" || secrets["k2"] != "v2" {
+	if string(secrets["k1"]) != "v1" || string(secrets["k2"]) != "v2" {
 		t.Fatalf("unexpected: %v", secrets)
 	}
 }
