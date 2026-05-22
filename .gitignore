@@ -23,6 +23,9 @@ vendor/
 # Claude
 .claude/
 
+# Workspace (dev scratch: keys, repos, config)
+.workspace/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -23,7 +23,8 @@ docs/                       # Documentation (architecture, API reference, config
 
 - **SOPS as git submodule**, NOT a remote go.mod dependency. `go.mod` uses `replace github.com/getsops/sops/v3 => ./third_party/sops`
 - **net/http standard library** — no chi or third-party routers. Uses `{rest...}` catch-all wildcard with manual `parseSecretsPath()` splitting on `/keys/` delimiter for nested namespace support
-- **age encryption** — SOPS age key file path set via `os.Setenv("SOPS_AGE_KEY_FILE", ...)` because SOPS keyservice internally calls `MasterKey.Decrypt()` which reads from env
+- **age encryption** — supports multiple age key files via `sops.age_key_files` config or `SOPS_AGE_KEY_FILE` env var. All identities are merged for decryption. `SOPS_AGE_KEY_FILE` is set internally for the SOPS keyservice
+- **Standard SOPS identity management** — SopsGate does NOT introduce its own identity config. Uses `.sops.yaml` creation rules from the secrets repo for encryption recipients, and standard SOPS env vars for key files. Existing SOPS-encrypted files can be served without re-encryption
 - **go-git** for all git operations — no shelling out to git CLI
 - **Two-level locking**: per-namespace mutex in service layer + global mutex in GitStore for commit serialization
 - **CRITICAL — No plaintext on disk**: Decrypted secret values must NEVER be written to the filesystem. All decryption happens in memory (`map[string]string`), mutations happen in memory, and only SOPS-encrypted ciphertext is written to disk via `GitStore.WriteFile()`. Never introduce temp files, debug logging of values, or any code path that serializes plaintext secrets to disk. See `docs/architecture.md` for the full invariant.
@@ -35,7 +36,7 @@ go build -o sopsgate ./cmd/server
 ./sopsgate -config config.yaml
 ```
 
-Config requires `storage.repo_path` and `sops.age_key_file`.
+Config requires `storage.repo_path` and at least one of `sops.age_key_files` or `SOPS_AGE_KEY_FILE` env var.
 
 ## Testing
 

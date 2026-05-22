@@ -30,7 +30,7 @@ func setupHandlerTest(t *testing.T) (*Handler, *httptest.Server) {
 	}
 
 	repoPath := filepath.Join(dir, "repo")
-	sopsEngine, err := store.NewSOPSEngine(keyFile)
+	sopsEngine, err := store.NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}

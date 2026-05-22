@@ -53,7 +53,12 @@ func (s *SecretsService) CreateNamespace(namespace, author string) error {
 		return fmt.Errorf("namespace %q already exists", namespace)
 	}
 
-	data, err := s.sops.CreateEmptyEncryptedFile()
+	keyGroups, err := s.sops.KeyGroupsForFile(namespace)
+	if err != nil {
+		return fmt.Errorf("resolve key groups: %w", err)
+	}
+
+	data, err := s.sops.CreateEmptyEncryptedFile(keyGroups)
 	if err != nil {
 		return fmt.Errorf("create encrypted file: %w", err)
 	}
@@ -182,7 +187,7 @@ func (s *SecretsService) BulkPutSecrets(namespace string, secrets map[string]str
 		existing[k] = v
 	}
 
-	newData, err := s.sops.EncryptMap(existing, data)
+	newData, err := s.sops.EncryptMap(existing, data, nil)
 	if err != nil {
 		return fmt.Errorf("encrypt: %w", err)
 	}

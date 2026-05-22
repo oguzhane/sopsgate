@@ -41,7 +41,7 @@ type TokenConfig struct {
 
 // SOPSConfig holds SOPS-related settings.
 type SOPSConfig struct {
-	AgeKeyFile string `yaml:"age_key_file"`
+	AgeKeyFiles []string `yaml:"age_key_files"`
 }
 
 // Defaults returns a Config with sensible defaults.
@@ -81,8 +81,25 @@ func (c Config) Validate() error {
 	if c.Storage.RepoPath == "" {
 		return fmt.Errorf("storage.repo_path is required")
 	}
-	if c.SOPS.AgeKeyFile == "" {
-		return fmt.Errorf("sops.age_key_file is required")
+	if len(c.SOPS.AgeKeyFiles) == 0 && os.Getenv("SOPS_AGE_KEY_FILE") == "" {
+		return fmt.Errorf("sops.age_key_files or SOPS_AGE_KEY_FILE env var is required")
 	}
 	return nil
+}
+
+// ResolveAgeKeyFiles returns the effective list of age key file paths,
+// merging config and SOPS_AGE_KEY_FILE env var.
+func (c Config) ResolveAgeKeyFiles() []string {
+	files := make([]string, 0, len(c.SOPS.AgeKeyFiles)+1)
+	files = append(files, c.SOPS.AgeKeyFiles...)
+	if envFile := os.Getenv("SOPS_AGE_KEY_FILE"); envFile != "" {
+		// Avoid duplicates.
+		for _, f := range files {
+			if f == envFile {
+				return files
+			}
+		}
+		files = append(files, envFile)
+	}
+	return files
 }

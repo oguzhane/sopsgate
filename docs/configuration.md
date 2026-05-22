@@ -19,7 +19,9 @@ auth:
       token: "sk-..."           # Bearer token value
 
 sops:
-  age_key_file: "/path/to/key"  # Path to age private key file (required)
+  age_key_files:                # Paths to age private key files (optional if SOPS_AGE_KEY_FILE is set)
+    - "/path/to/key1"
+    - "/path/to/key2"           # Multiple keys for multi-tenant decryption
 ```
 
 ## Required Fields
@@ -27,11 +29,35 @@ sops:
 | Field | Description |
 |-------|-------------|
 | `storage.repo_path` | Directory for the git-backed secrets repo. Created automatically if it doesn't exist. |
-| `sops.age_key_file` | Path to an age key file generated with `age-keygen`. Contains both private key and public key (as comment). |
 
-## Environment
+## SOPS Key Configuration
 
-SopsGate sets `SOPS_AGE_KEY_FILE` internally to the configured `age_key_file` path. This is required for the SOPS keyservice to decrypt data keys.
+SopsGate needs age private keys for decryption. Keys can come from two sources (both are merged):
+
+| Source | Description |
+|--------|-------------|
+| `sops.age_key_files` | List of age key file paths in the config file |
+| `SOPS_AGE_KEY_FILE` env var | Standard SOPS env var pointing to an age key file |
+
+At least one source must be provided. Multiple key files are supported — all identities are loaded and SOPS automatically uses the correct one for each encrypted file.
+
+### `.sops.yaml` Creation Rules
+
+When creating new namespaces, SopsGate reads `.sops.yaml` from the secrets repo root to determine which age recipients (public keys) to use for encryption. This follows the standard SOPS convention:
+
+```yaml
+# Place this in the secrets repo root (storage.repo_path)
+creation_rules:
+  - path_regex: secrets/prod\..*
+    age: 'age1abc...'           # Production key
+  - path_regex: secrets/dev\..*
+    age: 'age1xyz...'           # Development key
+  - age: 'age1default...'       # Catch-all
+```
+
+Rules are evaluated top-down; the first `path_regex` match wins. If no `.sops.yaml` exists, SopsGate uses the recipients from the configured age key files.
+
+This means existing SOPS-encrypted files can be served by SopsGate without re-encryption — just provide the matching private keys.
 
 ## Auth Tokens
 

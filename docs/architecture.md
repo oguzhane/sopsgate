@@ -92,3 +92,22 @@ Key code enforcing this:
 - **Per-namespace mutex** in service layer — serializes writes to the same SOPS file
 - **Global git mutex** in GitStore — serializes all git add/commit operations (go-git requirement)
 - **Lock-free reads** — decryption is stateless, reads HEAD or specific commits
+
+## Identity Management
+
+SopsGate follows standard SOPS conventions for key management — it does not introduce its own identity configuration format.
+
+### Decryption (age identities)
+
+`SOPSEngine` loads age private keys from multiple key files (configured via `sops.age_key_files` or `SOPS_AGE_KEY_FILE` env var). All identities are merged into a single pool. When decrypting, SOPS matches the correct identity against the encrypted file's metadata automatically.
+
+This enables multi-tenant setups: files encrypted with different age keys can coexist in the same repo, and SopsGate decrypts each using the matching identity.
+
+### Encryption (`.sops.yaml` creation rules)
+
+When creating new namespaces, SopsGate reads `.sops.yaml` from the secrets repo root and uses SOPS's `LoadCreationRuleForFile()` to resolve which recipients (age public keys) to use. Rules are matched by `path_regex` against the namespace file path (`secrets/{namespace}.sops.yaml`).
+
+If no `.sops.yaml` exists, SopsGate falls back to the recipients extracted from the configured age key files.
+
+When updating existing secrets, the recipients are already embedded in the SOPS metadata — no rule resolution is needed.
+

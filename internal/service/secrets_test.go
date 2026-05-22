@@ -23,7 +23,7 @@ func setupService(t *testing.T) *SecretsService {
 		t.Fatalf("age-keygen: %v\n%s", err, out)
 	}
 
-	sopsEngine, err := store.NewSOPSEngine(keyFile)
+	sopsEngine, err := store.NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}

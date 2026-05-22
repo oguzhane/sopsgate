@@ -24,7 +24,8 @@ func main() {
 	}
 
 	// Initialize SOPS engine.
-	sopsEngine, err := store.NewSOPSEngine(cfg.SOPS.AgeKeyFile)
+	ageKeyFiles := cfg.ResolveAgeKeyFiles()
+	sopsEngine, err := store.NewSOPSEngine(ageKeyFiles)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing SOPS: %v\n", err)
 		os.Exit(1)
@@ -36,6 +37,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error initializing Git store: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Wire repo path so SOPSEngine can find .sops.yaml.
+	sopsEngine.SetRepoPath(gitStore.RepoPath())
 
 	// Initialize service.
 	svc := service.NewSecretsService(sopsEngine, gitStore)

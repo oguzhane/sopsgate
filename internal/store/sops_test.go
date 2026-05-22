@@ -27,7 +27,7 @@ func generateAgeKey(t *testing.T) string {
 
 func TestSOPSEngine_NewEngine(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestSOPSEngine_NewEngine(t *testing.T) {
 }
 
 func TestSOPSEngine_NewEngine_BadKeyFile(t *testing.T) {
-	_, err := NewSOPSEngine("/nonexistent/key.txt")
+	_, err := NewSOPSEngine([]string{"/nonexistent/key.txt"})
 	if err == nil {
 		t.Fatal("expected error for missing key file")
 	}
@@ -46,7 +46,7 @@ func TestSOPSEngine_NewEngine_BadKeyFile(t *testing.T) {
 func TestSOPSEngine_NewEngine_InvalidKey(t *testing.T) {
 	tmpFile := filepath.Join(t.TempDir(), "bad.key")
 	os.WriteFile(tmpFile, []byte("not a valid age key"), 0600)
-	_, err := NewSOPSEngine(tmpFile)
+	_, err := NewSOPSEngine([]string{tmpFile})
 	if err == nil {
 		t.Fatal("expected error for invalid key file")
 	}
@@ -54,7 +54,7 @@ func TestSOPSEngine_NewEngine_InvalidKey(t *testing.T) {
 
 func TestSOPSEngine_EncryptDecryptRoundTrip(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestSOPSEngine_EncryptDecryptRoundTrip(t *testing.T) {
 	}
 
 	// Encrypt.
-	encrypted, err := engine.EncryptMap(secrets, nil)
+	encrypted, err := engine.EncryptMap(secrets, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,13 +88,13 @@ func TestSOPSEngine_EncryptDecryptRoundTrip(t *testing.T) {
 
 func TestSOPSEngine_SetSecret(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Create initial file.
-	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil)
+	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,12 +117,12 @@ func TestSOPSEngine_SetSecret(t *testing.T) {
 
 func TestSOPSEngine_DeleteSecret(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1", "key2": "val2"}, nil)
+	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1", "key2": "val2"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,12 +146,12 @@ func TestSOPSEngine_DeleteSecret(t *testing.T) {
 
 func TestSOPSEngine_DeleteSecret_NotFound(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil)
+	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,12 +164,12 @@ func TestSOPSEngine_DeleteSecret_NotFound(t *testing.T) {
 
 func TestSOPSEngine_GetSecret(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil)
+	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,12 +190,12 @@ func TestSOPSEngine_GetSecret(t *testing.T) {
 
 func TestSOPSEngine_ListKeys(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.EncryptMap(map[string]string{"b_key": "v1", "a_key": "v2"}, nil)
+	encrypted, err := engine.EncryptMap(map[string]string{"b_key": "v1", "a_key": "v2"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,12 +211,12 @@ func TestSOPSEngine_ListKeys(t *testing.T) {
 
 func TestSOPSEngine_CreateEmptyEncryptedFile(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.CreateEmptyEncryptedFile()
+	encrypted, err := engine.CreateEmptyEncryptedFile(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,20 +232,20 @@ func TestSOPSEngine_CreateEmptyEncryptedFile(t *testing.T) {
 
 func TestSOPSEngine_UpdateExistingFile(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Create file.
-	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil)
+	encrypted, err := engine.EncryptMap(map[string]string{"key1": "val1"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Update with new map (re-using existing encrypted metadata).
 	newSecrets := map[string]string{"key1": "updated", "key2": "new"}
-	encrypted, err = engine.EncryptMap(newSecrets, encrypted)
+	encrypted, err = engine.EncryptMap(newSecrets, encrypted, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestSOPSEngine_UpdateExistingFile(t *testing.T) {
 // ever exists in memory and is never written to disk.
 func TestSOPSEngine_NeverReturnsPlaintext(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestSOPSEngine_NeverReturnsPlaintext(t *testing.T) {
 	}
 
 	// 1. EncryptMap (new file) — output must be ciphertext only.
-	encrypted, err := engine.EncryptMap(plaintexts, nil)
+	encrypted, err := engine.EncryptMap(plaintexts, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestSOPSEngine_NeverReturnsPlaintext(t *testing.T) {
 		"api_key":     "PLAINTEXT_APIKEY_xyz789",
 		"token":       "PLAINTEXT_TOKEN_secret42",
 	}
-	reencrypted, err := engine.EncryptMap(updated, encrypted)
+	reencrypted, err := engine.EncryptMap(updated, encrypted, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestSOPSEngine_NeverReturnsPlaintext(t *testing.T) {
 	assertNoCleartext(t, "DeleteSecret", afterDelete)
 
 	// 5. CreateEmptyEncryptedFile — sanity check, should have no values at all.
-	empty, err := engine.CreateEmptyEncryptedFile()
+	empty, err := engine.CreateEmptyEncryptedFile(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,6 +339,98 @@ func TestSOPSEngine_NeverReturnsPlaintext(t *testing.T) {
 	}
 	if decrypted["new_key"] != "PLAINTEXT_NEWKEY_val999" {
 		t.Fatalf("expected new_key value after decrypt, got %q", decrypted["new_key"])
+	}
+}
+
+func TestSOPSEngine_MultipleIdentities(t *testing.T) {
+	keyFileA := generateAgeKey(t)
+	keyFileB := generateAgeKey(t)
+
+	// Encrypt with key A only.
+	engineA, err := NewSOPSEngine([]string{keyFileA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := engineA.EncryptMap(map[string]string{"secret": "multi-key-test"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Decrypt with engine loaded with both A and B — should succeed.
+	engineAB, err := NewSOPSEngine([]string{keyFileA, keyFileB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets, err := engineAB.DecryptFile(encrypted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secrets["secret"] != "multi-key-test" {
+		t.Fatalf("expected 'multi-key-test', got %q", secrets["secret"])
+	}
+
+	// Decrypt with key B only — should fail (file was encrypted for A's recipient).
+	engineB, err := NewSOPSEngine([]string{keyFileB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = engineB.DecryptFile(encrypted)
+	if err == nil {
+		t.Fatal("expected error decrypting with wrong key")
+	}
+}
+
+func TestSOPSEngine_KeyGroupsForFile(t *testing.T) {
+	keyFile := generateAgeKey(t)
+	engine, err := NewSOPSEngine([]string{keyFile})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No repo path set — should return nil.
+	groups, err := engine.KeyGroupsForFile("myapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if groups != nil {
+		t.Fatal("expected nil key groups when no repo path set")
+	}
+
+	// Set repo path to a dir without .sops.yaml — should return nil.
+	dir := t.TempDir()
+	engine.SetRepoPath(dir)
+	groups, err = engine.KeyGroupsForFile("myapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if groups != nil {
+		t.Fatal("expected nil key groups when no .sops.yaml exists")
+	}
+
+	// Create a .sops.yaml with age creation rules.
+	sopsConfig := `creation_rules:
+  - path_regex: secrets/prod\..*
+    age: 'age1yt3tfqlfrwdwx0z0ynwplcr6qxcxfaqycuprpmy89nr83ltx74tqdpszlw'
+  - age: 'age1s3cqcks5genc6ru8chl0hkkd04zmxvczsvdxq99ekffe4gmvjpzsedk23c'
+`
+	os.WriteFile(filepath.Join(dir, ".sops.yaml"), []byte(sopsConfig), 0644)
+
+	// "prod" namespace should match the first rule.
+	groups, err = engine.KeyGroupsForFile("prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) == 0 {
+		t.Fatal("expected key groups for prod namespace")
+	}
+
+	// "dev" namespace should match the default rule.
+	groups, err = engine.KeyGroupsForFile("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) == 0 {
+		t.Fatal("expected key groups for dev namespace (default rule)")
 	}
 }
 
@@ -363,7 +455,7 @@ func TestParseAgeRecipients_None(t *testing.T) {
 
 func TestSOPSEngine_DecryptCorruptData(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +479,7 @@ func TestSOPSEngine_DecryptCorruptData(t *testing.T) {
 	}
 
 	// Truncated SOPS file — starts valid but incomplete
-	encrypted, _ := engine.EncryptMap(map[string]string{"k": "v"}, nil)
+	encrypted, _ := engine.EncryptMap(map[string]string{"k": "v"}, nil, nil)
 	truncated := encrypted[:len(encrypted)/2]
 	_, err = engine.DecryptFile(truncated)
 	if err == nil {
@@ -397,12 +489,12 @@ func TestSOPSEngine_DecryptCorruptData(t *testing.T) {
 
 func TestSOPSEngine_SetSecret_OverwriteExisting(t *testing.T) {
 	keyFile := generateAgeKey(t)
-	engine, err := NewSOPSEngine(keyFile)
+	engine, err := NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	encrypted, err := engine.EncryptMap(map[string]string{"k": "original"}, nil)
+	encrypted, err := engine.EncryptMap(map[string]string{"k": "original"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

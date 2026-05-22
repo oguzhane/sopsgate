@@ -34,7 +34,7 @@ func setupServer(t *testing.T) (*httptest.Server, string) {
 
 	repoPath := filepath.Join(dir, "repo")
 
-	sopsEngine, err := store.NewSOPSEngine(keyFile)
+	sopsEngine, err := store.NewSOPSEngine([]string{keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}

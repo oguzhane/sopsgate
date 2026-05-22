@@ -31,7 +31,8 @@ auth:
     - name: admin
       token: "sk-test-123"
 sops:
-  age_key_file: "/tmp/age.key"
+  age_key_files:
+    - "/tmp/age.key"
 `
 	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -64,13 +65,65 @@ func TestValidate_MissingRepoPath(t *testing.T) {
 	}
 }
 
-func TestValidate_MissingAgeKeyFile(t *testing.T) {
+func TestValidate_MissingAgeKeyFiles(t *testing.T) {
+	// Unset env var to ensure validation catches missing keys.
+	orig := os.Getenv("SOPS_AGE_KEY_FILE")
+	os.Unsetenv("SOPS_AGE_KEY_FILE")
+	defer os.Setenv("SOPS_AGE_KEY_FILE", orig)
+
 	cfg := Config{
 		Storage: StorageConfig{RepoPath: "/tmp"},
 	}
 	err := cfg.Validate()
 	if err == nil {
-		t.Error("expected validation error for missing age_key_file")
+		t.Error("expected validation error for missing age_key_files")
+	}
+}
+
+func TestValidate_EnvVarFallback(t *testing.T) {
+	os.Setenv("SOPS_AGE_KEY_FILE", "/tmp/env-key.key")
+	defer os.Unsetenv("SOPS_AGE_KEY_FILE")
+
+	cfg := Config{
+		Storage: StorageConfig{RepoPath: "/tmp"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected no error when SOPS_AGE_KEY_FILE is set, got: %v", err)
+	}
+
+	files := cfg.ResolveAgeKeyFiles()
+	if len(files) != 1 || files[0] != "/tmp/env-key.key" {
+		t.Errorf("expected [/tmp/env-key.key], got %v", files)
+	}
+}
+
+func TestResolveAgeKeyFiles_MergesConfigAndEnv(t *testing.T) {
+	os.Setenv("SOPS_AGE_KEY_FILE", "/tmp/env-key.key")
+	defer os.Unsetenv("SOPS_AGE_KEY_FILE")
+
+	cfg := Config{
+		Storage: StorageConfig{RepoPath: "/tmp"},
+		SOPS:    SOPSConfig{AgeKeyFiles: []string{"/tmp/config-key.key"}},
+	}
+	files := cfg.ResolveAgeKeyFiles()
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %v", files)
+	}
+	if files[0] != "/tmp/config-key.key" || files[1] != "/tmp/env-key.key" {
+		t.Errorf("unexpected files: %v", files)
+	}
+}
+
+func TestResolveAgeKeyFiles_DeduplicatesEnv(t *testing.T) {
+	os.Setenv("SOPS_AGE_KEY_FILE", "/tmp/same.key")
+	defer os.Unsetenv("SOPS_AGE_KEY_FILE")
+
+	cfg := Config{
+		SOPS: SOPSConfig{AgeKeyFiles: []string{"/tmp/same.key"}},
+	}
+	files := cfg.ResolveAgeKeyFiles()
+	if len(files) != 1 {
+		t.Errorf("expected deduplication, got %v", files)
 	}
 }
 

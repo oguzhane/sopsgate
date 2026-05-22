@@ -4,6 +4,7 @@ package store
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	sops "github.com/getsops/sops/v3"
@@ -15,42 +16,86 @@ import (
 
 // SOPSEngine handles encryption and decryption of secret files using the SOPS library.
 type SOPSEngine struct {
-	ageKeyFile string
-	identities age.ParsedIdentities
-	recipients []string
-	store      *yamlstore.Store
-	cipher     sops.Cipher
-	mu         sync.Mutex
+	ageKeyFiles []string
+	identities  age.ParsedIdentities
+	recipients  []string
+	store       *yamlstore.Store
+	cipher      sops.Cipher
+	repoPath    string
+	mu          sync.Mutex
 }
 
 // NewSOPSEngine creates a new SOPS engine with age key support.
-func NewSOPSEngine(ageKeyFile string) (*SOPSEngine, error) {
-	data, err := os.ReadFile(ageKeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("read age key file: %w", err)
+// Accepts multiple key file paths; all identities and recipients are merged.
+func NewSOPSEngine(ageKeyFiles []string) (*SOPSEngine, error) {
+	var allIdentities age.ParsedIdentities
+	var allRecipients []string
+
+	for _, keyFile := range ageKeyFiles {
+		data, err := os.ReadFile(keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("read age key file %s: %w", keyFile, err)
+		}
+
+		var identities age.ParsedIdentities
+		if err := identities.Import(string(data)); err != nil {
+			return nil, fmt.Errorf("parse age identities from %s: %w", keyFile, err)
+		}
+		allIdentities = append(allIdentities, identities...)
+
+		recipients, err := parseAgeRecipients(data)
+		if err != nil {
+			return nil, fmt.Errorf("parse age recipients from %s: %w", keyFile, err)
+		}
+		allRecipients = append(allRecipients, recipients...)
 	}
 
-	var identities age.ParsedIdentities
-	if err := identities.Import(string(data)); err != nil {
-		return nil, fmt.Errorf("parse age identities: %w", err)
+	if len(allIdentities) == 0 {
+		return nil, fmt.Errorf("no age identities found in key files")
 	}
 
-	recipients, err := parseAgeRecipients(data)
-	if err != nil {
-		return nil, fmt.Errorf("parse age recipients: %w", err)
+	// Set SOPS_AGE_KEY_FILE for the SOPS keyservice which reads it internally.
+	// When multiple key files are provided, set to the first one — the keyservice
+	// only needs one path, and our applyIdentities handles the rest.
+	if len(ageKeyFiles) > 0 {
+		os.Setenv("SOPS_AGE_KEY_FILE", ageKeyFiles[0])
 	}
-
-	// Set SOPS_AGE_KEY_FILE so that the SOPS keyservice Server can find
-	// the age identities when decrypting data keys internally.
-	os.Setenv("SOPS_AGE_KEY_FILE", ageKeyFile)
 
 	return &SOPSEngine{
-		ageKeyFile: ageKeyFile,
-		identities: identities,
-		recipients: recipients,
-		store:      yamlstore.NewStore(&sopsconfig.YAMLStoreConfig{Indent: 4}),
-		cipher:     aes.NewCipher(),
+		ageKeyFiles: ageKeyFiles,
+		identities:  allIdentities,
+		recipients:  allRecipients,
+		store:       yamlstore.NewStore(&sopsconfig.YAMLStoreConfig{Indent: 4}),
+		cipher:      aes.NewCipher(),
 	}, nil
+}
+
+// SetRepoPath sets the secrets repo path, used to locate .sops.yaml.
+func (e *SOPSEngine) SetRepoPath(path string) {
+	e.repoPath = path
+}
+
+// KeyGroupsForFile resolves the SOPS key groups for a namespace by reading
+// .sops.yaml creation rules from the repo root. Returns nil if no .sops.yaml
+// exists (callers should fall back to engine defaults).
+func (e *SOPSEngine) KeyGroupsForFile(namespace string) ([]sops.KeyGroup, error) {
+	if e.repoPath == "" {
+		return nil, nil
+	}
+
+	confPath := filepath.Join(e.repoPath, ".sops.yaml")
+	if _, err := os.Stat(confPath); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	filePath := filepath.Join(e.repoPath, "secrets", namespace+".sops.yaml")
+
+	cfg, err := sopsconfig.LoadCreationRuleForFile(confPath, filePath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("load creation rule for %s: %w", namespace, err)
+	}
+
+	return cfg.KeyGroups, nil
 }
 
 // parseAgeRecipients extracts public key recipients from an age key file.
@@ -117,8 +162,9 @@ func (e *SOPSEngine) DecryptFile(encrypted []byte) (map[string]string, error) {
 
 // EncryptMap encrypts key-value pairs into a SOPS-encrypted YAML file.
 // If existingEncrypted is non-nil, it updates the existing file (preserving metadata).
-// Otherwise creates a new encrypted file.
-func (e *SOPSEngine) EncryptMap(secrets map[string]string, existingEncrypted []byte) ([]byte, error) {
+// Otherwise creates a new encrypted file using the provided keyGroups.
+// If keyGroups is nil for a new file, falls back to the engine's own age recipients.
+func (e *SOPSEngine) EncryptMap(secrets map[string]string, existingEncrypted []byte, keyGroups []sops.KeyGroup) ([]byte, error) {
 	var tree sops.Tree
 
 	if existingEncrypted != nil {
@@ -147,12 +193,15 @@ func (e *SOPSEngine) EncryptMap(secrets map[string]string, existingEncrypted []b
 		}
 		tree.Metadata.MessageAuthenticationCode = mac
 	} else {
-		masterKeys := e.newAgeMasterKeys()
+		groups := keyGroups
+		if len(groups) == 0 {
+			groups = []sops.KeyGroup{e.newAgeMasterKeys()}
+		}
 
 		tree = sops.Tree{
 			Branches: mapToTreeBranches(secrets),
 			Metadata: sops.Metadata{
-				KeyGroups:         []sops.KeyGroup{masterKeys},
+				KeyGroups:         groups,
 				Version:           "3.9.0",
 				UnencryptedSuffix: sops.DefaultUnencryptedSuffix,
 			},
@@ -233,8 +282,9 @@ func sortedKeys(m map[string]string) []string {
 }
 
 // CreateEmptyEncryptedFile creates a new encrypted YAML file with no secrets.
-func (e *SOPSEngine) CreateEmptyEncryptedFile() ([]byte, error) {
-	return e.EncryptMap(map[string]string{}, nil)
+// keyGroups determines which recipients to use; nil falls back to engine defaults.
+func (e *SOPSEngine) CreateEmptyEncryptedFile(keyGroups []sops.KeyGroup) ([]byte, error) {
+	return e.EncryptMap(map[string]string{}, nil, keyGroups)
 }
 
 // SetSecret decrypts an existing file, sets/updates a key, and re-encrypts.
@@ -244,7 +294,7 @@ func (e *SOPSEngine) SetSecret(encrypted []byte, key, value string) ([]byte, err
 		return nil, err
 	}
 	secrets[key] = value
-	return e.EncryptMap(secrets, encrypted)
+	return e.EncryptMap(secrets, encrypted, nil)
 }
 
 // DeleteSecret decrypts an existing file, removes a key, and re-encrypts.
@@ -257,7 +307,7 @@ func (e *SOPSEngine) DeleteSecret(encrypted []byte, key string) ([]byte, error) 
 		return nil, fmt.Errorf("key %q not found", key)
 	}
 	delete(secrets, key)
-	return e.EncryptMap(secrets, encrypted)
+	return e.EncryptMap(secrets, encrypted, nil)
 }
 
 // GetSecret decrypts and returns a single secret value.
