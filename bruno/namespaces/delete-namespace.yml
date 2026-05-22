@@ -1,0 +1,11 @@
+info:
+  name: Delete Namespace
+  type: http
+  seq: 3
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/v1/namespaces/{{namespace}}"
+  headers:
+    - name: Authorization
+      value: "Bearer {{token}}"

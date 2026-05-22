@@ -1,0 +1,11 @@
+info:
+  name: Create Namespace
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/v1/namespaces/{{namespace}}"
+  headers:
+    - name: Authorization
+      value: "Bearer {{token}}"

@@ -74,3 +74,7 @@ See the [`docs/`](docs/) folder for detailed documentation:
 - [API Reference](docs/api-reference.md) — full endpoint documentation
 - [Architecture](docs/architecture.md) — design and internals
 - [Deployment](docs/deployment.md) — production deployment guide
+
+## Skills
+
+- **bruno** (`.claude/skills/bruno.md`) — generates a Bruno OpenCollection YAML API collection from project docs. Reads endpoints from `docs/api-reference.md` or `CLAUDE.md`, creates an importable `bruno/` folder with environments, auth, and organized request files. Trigger with "generate bruno collection" or "create bruno requests".
