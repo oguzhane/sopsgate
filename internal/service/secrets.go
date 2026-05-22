@@ -278,6 +278,48 @@ func (s *SecretsService) GetSecretAtVersion(namespace, key, version string) (*mo
 	}, nil
 }
 
+// GenerateSecret generates a random secret, stores it, and returns the value and version.
+func (s *SecretsService) GenerateSecret(namespace, key string, req store.GenerateRequest, author string) (*model.GenerateSecretResponse, error) {
+	mu := s.locks.get(namespace)
+	mu.Lock()
+	defer mu.Unlock()
+
+	data, err := s.git.ReadFile(namespace)
+	if err != nil {
+		return nil, fmt.Errorf("namespace %q not found", namespace)
+	}
+
+	value, err := store.GenerateSecret(req)
+	if err != nil {
+		return nil, fmt.Errorf("generate secret: %w", err)
+	}
+	// Convert to string before zeroing — string(value) copies the bytes,
+	// so we can safely zero the original slice after.
+	strValue := string(value)
+
+	newData, err := s.sops.SetSecret(data, key, value)
+	store.ZeroBytes(value) // Zero immediately after encryption uses it.
+	if err != nil {
+		return nil, fmt.Errorf("set secret: %w", err)
+	}
+
+	if err := s.git.WriteFile(namespace, newData); err != nil {
+		return nil, fmt.Errorf("write file: %w", err)
+	}
+
+	hash, err := s.git.Commit(namespace, fmt.Sprintf("[sopsgate] GENERATE %s/%s by %s", namespace, key, author), author)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.GenerateSecretResponse{
+		Namespace: namespace,
+		Key:       key,
+		Value:     strValue,
+		Version:   hash,
+	}, nil
+}
+
 // resolveHash resolves a short hash to a full hash by scanning history.
 func (s *SecretsService) resolveHash(namespace, shortHash string) (string, error) {
 	history, err := s.git.FileHistory(namespace)

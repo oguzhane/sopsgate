@@ -159,6 +159,41 @@ Get a secret's value at a specific version (commit hash).
 
 ---
 
+## Secret Generation
+
+### `POST /api/v1/secrets/{namespace}/keys/{key}/generate`
+
+Generate a cryptographically random secret and store it.
+
+**Request body:**
+```json
+{
+  "type": "password",
+  "length": 32,
+  "charset": "alphanumeric"
+}
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `type` | yes | — | `password`, `hex`, or `base64` |
+| `length` | no | type-dependent | Output length (chars for password/hex, bytes for base64) |
+| `charset` | no | `full` | For `password` only: `alphanumeric`, `alphabetic`, `numeric`, `full` |
+
+**Defaults:** password=32 chars, hex=64 chars, base64=32 bytes.
+
+**Response:** `201 Created`
+```json
+{
+  "namespace": "myapp",
+  "key": "db_password",
+  "value": "x7!kQ9m2Lp...",
+  "version": "a3f8c2d"
+}
+```
+
+---
+
 ## Error Responses
 
 All errors return:

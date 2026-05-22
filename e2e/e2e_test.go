@@ -662,3 +662,83 @@ func TestE2E_MTLS_NoClientCert(t *testing.T) {
 		t.Fatal("expected TLS handshake error, got nil")
 	}
 }
+
+func TestE2E_GenerateSecret(t *testing.T) {
+	srv, token := setupServer(t)
+
+	// Create namespace.
+	resp := doReq(t, "POST", srv.URL+"/api/v1/namespaces/gentest", token, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create namespace: expected 201, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Generate a password.
+	resp = doReq(t, "POST", srv.URL+"/api/v1/secrets/gentest/keys/db_password/generate", token,
+		model.GenerateSecretRequest{Type: "password", Length: 24, Charset: "alphanumeric"})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("generate password: expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var genResp model.GenerateSecretResponse
+	readJSON(t, resp, &genResp)
+	if genResp.Namespace != "gentest" || genResp.Key != "db_password" {
+		t.Fatalf("unexpected response: %+v", genResp)
+	}
+	if len(genResp.Value) != 24 {
+		t.Fatalf("expected 24-char value, got %d", len(genResp.Value))
+	}
+	if genResp.Version == "" {
+		t.Fatal("expected version to be set")
+	}
+
+	// GET to verify the stored value matches.
+	resp = doReq(t, "GET", srv.URL+"/api/v1/secrets/gentest/keys/db_password", token, nil)
+	var secret model.Secret
+	readJSON(t, resp, &secret)
+	if secret.Value != genResp.Value {
+		t.Fatalf("GET value %q != generated value %q", secret.Value, genResp.Value)
+	}
+
+	// Generate a hex key.
+	resp = doReq(t, "POST", srv.URL+"/api/v1/secrets/gentest/keys/hmac_key/generate", token,
+		model.GenerateSecretRequest{Type: "hex", Length: 64})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("generate hex: expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var hexResp model.GenerateSecretResponse
+	readJSON(t, resp, &hexResp)
+	if len(hexResp.Value) != 64 {
+		t.Fatalf("expected 64-char hex, got %d", len(hexResp.Value))
+	}
+
+	// Generate a base64 key.
+	resp = doReq(t, "POST", srv.URL+"/api/v1/secrets/gentest/keys/enc_key/generate", token,
+		model.GenerateSecretRequest{Type: "base64", Length: 32})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("generate base64: expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var b64Resp model.GenerateSecretResponse
+	readJSON(t, resp, &b64Resp)
+	if b64Resp.Value == "" {
+		t.Fatal("expected non-empty base64 value")
+	}
+
+	// Invalid request → 400.
+	resp = doReq(t, "POST", srv.URL+"/api/v1/secrets/gentest/keys/bad/generate", token,
+		model.GenerateSecretRequest{Type: "invalid"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid type: expected 400, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Namespace not found → 404.
+	resp = doReq(t, "POST", srv.URL+"/api/v1/secrets/nosuchns/keys/k/generate", token,
+		model.GenerateSecretRequest{Type: "password"})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing ns: expected 404, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}

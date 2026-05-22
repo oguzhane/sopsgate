@@ -34,6 +34,7 @@ func NewRouter(h *Handler, auth Authenticator) http.Handler {
 	// Secrets: catch-all, then dispatch based on path structure.
 	mux.HandleFunc("GET /api/v1/secrets/{rest...}", h.handleGetSecrets)
 	mux.HandleFunc("PUT /api/v1/secrets/{rest...}", h.handlePutSecrets)
+	mux.HandleFunc("POST /api/v1/secrets/{rest...}", h.handlePostSecrets)
 	mux.HandleFunc("DELETE /api/v1/secrets/{rest...}", h.handleDeleteSecrets)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -72,18 +73,25 @@ func parseSecretsPath(rest string) (ns, key, extra string) {
 	//   "mykey"
 	//   "mykey/versions"
 	//   "mykey/versions/abc1234"
+	//   "mykey/generate"
 	versionsIdx := strings.Index(afterKeys, "/versions")
-	if versionsIdx == -1 {
-		return ns, afterKeys, ""
+	if versionsIdx != -1 {
+		key = afterKeys[:versionsIdx]
+		afterVersions := afterKeys[versionsIdx+9:] // after "/versions"
+		if afterVersions == "" || afterVersions == "/" {
+			return ns, key, "versions"
+		}
+		// Strip leading slash from version hash.
+		return ns, key, strings.TrimPrefix(afterVersions, "/")
 	}
 
-	key = afterKeys[:versionsIdx]
-	afterVersions := afterKeys[versionsIdx+9:] // after "/versions"
-	if afterVersions == "" || afterVersions == "/" {
-		return ns, key, "versions"
+	generateIdx := strings.Index(afterKeys, "/generate")
+	if generateIdx != -1 {
+		key = afterKeys[:generateIdx]
+		return ns, key, "generate"
 	}
-	// Strip leading slash from version hash.
-	return ns, key, strings.TrimPrefix(afterVersions, "/")
+
+	return ns, afterKeys, ""
 }
 
 // --- GET dispatcher ---
@@ -134,6 +142,19 @@ func (h *Handler) handleDeleteSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.DeleteSecret(w, r, ns, key)
+}
+
+// --- POST dispatcher ---
+
+func (h *Handler) handlePostSecrets(w http.ResponseWriter, r *http.Request) {
+	rest := r.PathValue("rest")
+	ns, key, extra := parseSecretsPath(rest)
+
+	if key != "" && extra == "generate" {
+		h.GenerateSecret(w, r, ns, key)
+		return
+	}
+	writeError(w, http.StatusBadRequest, "invalid path")
 }
 
 // --- Namespace Handlers ---
@@ -228,6 +249,37 @@ func (h *Handler) DeleteSecret(w http.ResponseWriter, r *http.Request, ns, key s
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) GenerateSecret(w http.ResponseWriter, r *http.Request, ns, key string) {
+	author := identityFromContext(r)
+
+	var req model.GenerateSecretRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	genReq := store.GenerateRequest{
+		Type:    req.Type,
+		Length:  req.Length,
+		Charset: req.Charset,
+	}
+
+	resp, err := h.svc.GenerateSecret(ns, key, genReq, author)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "must be") {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (h *Handler) ListOrGetSecrets(w http.ResponseWriter, r *http.Request, ns string) {

@@ -152,6 +152,7 @@ All endpoints require `Authorization: Bearer <token>` except `/healthz`.
 | `DELETE` | `/api/v1/secrets/{ns}/keys/{key}` | Delete a secret |
 | `GET` | `/api/v1/secrets/{ns}/keys/{key}/versions` | Version history |
 | `GET` | `/api/v1/secrets/{ns}/keys/{key}/versions/{hash}` | Secret at version |
+| `POST` | `/api/v1/secrets/{ns}/keys/{key}/generate` | Generate random secret |
 
 See [API Reference](docs/api-reference.md) for request/response details.
 

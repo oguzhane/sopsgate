@@ -65,6 +65,21 @@ type NamespacesResponse struct {
 	Namespaces []string `json:"namespaces"`
 }
 
+// GenerateSecretRequest is the body for POST /secrets/{ns}/keys/{key}/generate.
+type GenerateSecretRequest struct {
+	Type    string `json:"type"`              // "password", "hex", "base64"
+	Length  int    `json:"length,omitempty"`   // output length
+	Charset string `json:"charset,omitempty"` // for password: "alphanumeric", "alphabetic", "numeric", "full"
+}
+
+// GenerateSecretResponse is the response for POST /secrets/{ns}/keys/{key}/generate.
+type GenerateSecretResponse struct {
+	Namespace string `json:"namespace"`
+	Key       string `json:"key"`
+	Value     string `json:"value"`
+	Version   string `json:"version"`
+}
+
 // ErrorResponse is the standard error response.
 type ErrorResponse struct {
 	Error   string `json:"error"`

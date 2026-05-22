@@ -68,6 +68,7 @@ Base path: `/api/v1`. Bearer token auth on all routes except `/healthz`.
 - `GET /secrets/{ns}/keys/{key}/versions/{hash}` — secret at version
 - `GET /secrets/{ns}?reveal=true` — bulk get all secrets
 - `PUT /secrets/{ns}` — bulk put secrets
+- `POST /secrets/{ns}/keys/{key}/generate` — generate random secret (password, hex, base64)
 
 ## Documentation
 
