@@ -144,3 +144,104 @@ func TestLoad_InvalidYAML(t *testing.T) {
 		t.Error("expected error for invalid YAML")
 	}
 }
+
+func TestValidate_TLS_CertWithoutKey(t *testing.T) {
+	cfg := Config{
+		Storage: StorageConfig{RepoPath: "/tmp"},
+		SOPS:    SOPSConfig{AgeKeyFiles: []string{"/tmp/k.key"}},
+		Server:  ServerConfig{Address: ":8080", TLS: TLSConfig{CertFile: "/tmp/cert.pem"}},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for cert_file without key_file")
+	}
+}
+
+func TestValidate_TLS_KeyWithoutCert(t *testing.T) {
+	cfg := Config{
+		Storage: StorageConfig{RepoPath: "/tmp"},
+		SOPS:    SOPSConfig{AgeKeyFiles: []string{"/tmp/k.key"}},
+		Server:  ServerConfig{Address: ":8080", TLS: TLSConfig{KeyFile: "/tmp/key.pem"}},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for key_file without cert_file")
+	}
+}
+
+func TestValidate_TLS_ClientCAWithoutServerCert(t *testing.T) {
+	cfg := Config{
+		Storage: StorageConfig{RepoPath: "/tmp"},
+		SOPS:    SOPSConfig{AgeKeyFiles: []string{"/tmp/k.key"}},
+		Server:  ServerConfig{Address: ":8080", TLS: TLSConfig{ClientCAFile: "/tmp/ca.pem"}},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for client_ca_file without server cert")
+	}
+}
+
+func TestValidate_TLS_NonexistentFiles(t *testing.T) {
+	cfg := Config{
+		Storage: StorageConfig{RepoPath: "/tmp"},
+		SOPS:    SOPSConfig{AgeKeyFiles: []string{"/tmp/k.key"}},
+		Server: ServerConfig{Address: ":8080", TLS: TLSConfig{
+			CertFile: "/nonexistent/cert.pem",
+			KeyFile:  "/nonexistent/key.pem",
+		}},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for nonexistent TLS files")
+	}
+}
+
+func TestValidate_TLS_ValidConfig(t *testing.T) {
+	dir := t.TempDir()
+	certFile := filepath.Join(dir, "cert.pem")
+	keyFile := filepath.Join(dir, "key.pem")
+	caFile := filepath.Join(dir, "ca.pem")
+	os.WriteFile(certFile, []byte("cert"), 0644)
+	os.WriteFile(keyFile, []byte("key"), 0644)
+	os.WriteFile(caFile, []byte("ca"), 0644)
+
+	cfg := Config{
+		Storage: StorageConfig{RepoPath: "/tmp"},
+		SOPS:    SOPSConfig{AgeKeyFiles: []string{"/tmp/k.key"}},
+		Server: ServerConfig{Address: ":8443", TLS: TLSConfig{
+			CertFile:     certFile,
+			KeyFile:      keyFile,
+			ClientCAFile: caFile,
+		}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid TLS config, got: %v", err)
+	}
+	if !cfg.Server.TLS.Enabled() {
+		t.Fatal("expected TLS enabled")
+	}
+	if !cfg.Server.TLS.MutualTLS() {
+		t.Fatal("expected mTLS enabled")
+	}
+}
+
+func TestTLSConfig_Enabled(t *testing.T) {
+	if (TLSConfig{}).Enabled() {
+		t.Fatal("empty config should not be enabled")
+	}
+	if (TLSConfig{CertFile: "a"}).Enabled() {
+		t.Fatal("cert without key should not be enabled")
+	}
+	if !(TLSConfig{CertFile: "a", KeyFile: "b"}).Enabled() {
+		t.Fatal("cert + key should be enabled")
+	}
+}
+
+func TestTLSConfig_MutualTLS(t *testing.T) {
+	if (TLSConfig{CertFile: "a", KeyFile: "b"}).MutualTLS() {
+		t.Fatal("no client CA should not be mTLS")
+	}
+	if !(TLSConfig{CertFile: "a", KeyFile: "b", ClientCAFile: "c"}).MutualTLS() {
+		t.Fatal("all three fields should be mTLS")
+	}
+}

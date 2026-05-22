@@ -29,6 +29,7 @@ docs/                       # Documentation (architecture, API reference, config
 - **Two-level locking**: per-namespace mutex in service layer + global mutex in GitStore for commit serialization
 - **CRITICAL — No plaintext on disk**: Decrypted secret values must NEVER be written to the filesystem. All decryption happens in memory (`map[string][]byte`), mutations happen in memory, and only SOPS-encrypted ciphertext is written to disk via `GitStore.WriteFile()`. Never introduce temp files, debug logging of values, or any code path that serializes plaintext secrets to disk. See `docs/architecture.md` for the full invariant.
 - **Memory zeroing**: Plaintext values use `[]byte` (not `string`) throughout the internal data path so they can be deterministically zeroed after use via `ZeroBytes`/`ZeroSecretMap` in `internal/store/zeromem.go`. String conversion happens only at the HTTP response boundary. All decrypt sites use `defer ZeroSecretMap(secrets)` and `defer ZeroBytes(dataKey)`.
+- **Mutual TLS (mTLS)**: Optional TLS and mTLS via `server.tls` config. mTLS and bearer tokens coexist — mTLS gates who can connect (transport layer), tokens determine identity (HTTP layer). Configured via `cert_file`, `key_file`, `client_ca_file` in config. When omitted, runs plain HTTP.
 
 ## Building and Running
 

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"log"
@@ -62,8 +64,51 @@ func main() {
 	log.Printf("sopsgate starting on %s", cfg.Server.Address)
 	log.Printf("secrets repo: %s", cfg.Storage.RepoPath)
 
-	if err := http.ListenAndServe(cfg.Server.Address, router); err != nil {
-		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
-		os.Exit(1)
+	if cfg.Server.TLS.MutualTLS() {
+		tlsCfg, err := buildMutualTLSConfig(cfg.Server.TLS)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "TLS config error: %v\n", err)
+			os.Exit(1)
+		}
+		srv := &http.Server{
+			Addr:      cfg.Server.Address,
+			Handler:   router,
+			TLSConfig: tlsCfg,
+		}
+		log.Printf("mTLS enabled (client CA: %s)", cfg.Server.TLS.ClientCAFile)
+		if err := srv.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+			os.Exit(1)
+		}
+	} else if cfg.Server.TLS.Enabled() {
+		log.Printf("TLS enabled")
+		if err := http.ListenAndServeTLS(cfg.Server.Address, cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile, router); err != nil {
+			fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		if err := http.ListenAndServe(cfg.Server.Address, router); err != nil {
+			fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+			os.Exit(1)
+		}
 	}
+}
+
+// buildMutualTLSConfig creates a tls.Config that requires and verifies client certificates.
+func buildMutualTLSConfig(cfg config.TLSConfig) (*tls.Config, error) {
+	caCert, err := os.ReadFile(cfg.ClientCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read client CA file: %w", err)
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caCert) {
+		return nil, fmt.Errorf("failed to parse client CA certificate")
+	}
+
+	return &tls.Config{
+		ClientCAs:  pool,
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		MinVersion: tls.VersionTLS12,
+	}, nil
 }

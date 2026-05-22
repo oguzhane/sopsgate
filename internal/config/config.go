@@ -18,8 +18,22 @@ type Config struct {
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Address string `yaml:"address"`
+	Address string    `yaml:"address"`
+	TLS     TLSConfig `yaml:"tls"`
 }
+
+// TLSConfig holds TLS and mutual TLS settings.
+type TLSConfig struct {
+	CertFile     string `yaml:"cert_file"`      // Server certificate path
+	KeyFile      string `yaml:"key_file"`        // Server private key path
+	ClientCAFile string `yaml:"client_ca_file"`  // CA certificate for client verification (enables mTLS)
+}
+
+// Enabled returns true if server TLS is configured (cert + key).
+func (t TLSConfig) Enabled() bool { return t.CertFile != "" && t.KeyFile != "" }
+
+// MutualTLS returns true if mutual TLS is configured (TLS + client CA).
+func (t TLSConfig) MutualTLS() bool { return t.Enabled() && t.ClientCAFile != "" }
 
 // StorageConfig holds git-backed storage settings.
 type StorageConfig struct {
@@ -84,6 +98,27 @@ func (c Config) Validate() error {
 	if len(c.SOPS.AgeKeyFiles) == 0 && os.Getenv("SOPS_AGE_KEY_FILE") == "" {
 		return fmt.Errorf("sops.age_key_files or SOPS_AGE_KEY_FILE env var is required")
 	}
+
+	// TLS validation.
+	tls := c.Server.TLS
+	if (tls.CertFile != "") != (tls.KeyFile != "") {
+		return fmt.Errorf("server.tls: both cert_file and key_file are required together")
+	}
+	if tls.ClientCAFile != "" && !tls.Enabled() {
+		return fmt.Errorf("server.tls: client_ca_file requires cert_file and key_file")
+	}
+	for _, pair := range []struct{ name, path string }{
+		{"cert_file", tls.CertFile},
+		{"key_file", tls.KeyFile},
+		{"client_ca_file", tls.ClientCAFile},
+	} {
+		if pair.path != "" {
+			if _, err := os.Stat(pair.path); err != nil {
+				return fmt.Errorf("server.tls.%s: %w", pair.name, err)
+			}
+		}
+	}
+
 	return nil
 }
 

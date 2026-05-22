@@ -2,15 +2,25 @@ package e2e
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/oguzhane/sopsgate/internal/api"
 	"github.com/oguzhane/sopsgate/internal/model"
@@ -450,5 +460,205 @@ func TestE2E_ConcurrentSameKeyWrites(t *testing.T) {
 	// 1 create + 10 puts = 11 commits
 	if len(versResp.Versions) != 11 {
 		t.Fatalf("expected 11 versions, got %d", len(versResp.Versions))
+	}
+}
+
+// --- mTLS E2E Tests ---
+
+// generateTestCA creates a self-signed CA certificate and key.
+func generateTestCA(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Test CA"},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+	return caCert, caKey, caPEM
+}
+
+// generateTestCert creates a certificate signed by the given CA.
+func generateTestCert(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, cn string, isServer bool) (tls.Certificate, []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: cn},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	if isServer {
+		template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+		template.DNSNames = []string{"localhost"}
+		template.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
+	} else {
+		template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tlsCert, certPEM
+}
+
+func setupMTLSServer(t *testing.T) (serverURL, token string, caCert *x509.Certificate, caKey *ecdsa.PrivateKey, caPEM []byte) {
+	t.Helper()
+
+	if _, err := exec.LookPath("age-keygen"); err != nil {
+		t.Skip("age-keygen not found, skipping E2E tests")
+	}
+
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "age.key")
+	cmd := exec.Command("age-keygen", "-o", keyFile)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("age-keygen: %v\n%s", err, out)
+	}
+
+	sopsEngine, err := store.NewSOPSEngine([]string{keyFile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitStore, err := store.NewGitStore(filepath.Join(dir, "repo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := service.NewSecretsService(sopsEngine, gitStore)
+	handler := api.NewHandler(svc)
+	auth := api.NewTokenAuth([]struct{ Name, Token string }{
+		{Name: "admin", Token: "sk-mtls-token"},
+	})
+	router := api.NewRouter(handler, auth)
+
+	// Generate CA and server cert.
+	caCert, caKey, caPEM = generateTestCA(t)
+	serverCert, _ := generateTestCert(t, caCert, caKey, "localhost", true)
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(caCert)
+
+	srv := httptest.NewUnstartedServer(router)
+	srv.TLS = &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientCAs:    caPool,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		MinVersion:   tls.VersionTLS12,
+	}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+
+	return srv.URL, "sk-mtls-token", caCert, caKey, caPEM
+}
+
+func TestE2E_MTLS_ValidClientCert(t *testing.T) {
+	srvURL, token, caCert, caKey, caPEM := setupMTLSServer(t)
+
+	clientCert, _ := generateTestCert(t, caCert, caKey, "test-client", false)
+
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      caPool,
+			},
+		},
+	}
+
+	// Valid client cert + valid token → 200
+	req, _ := http.NewRequest("GET", srvURL+"/api/v1/namespaces", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request with valid client cert failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestE2E_MTLS_ValidCertNoToken(t *testing.T) {
+	srvURL, _, caCert, caKey, caPEM := setupMTLSServer(t)
+
+	clientCert, _ := generateTestCert(t, caCert, caKey, "test-client", false)
+
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      caPool,
+			},
+		},
+	}
+
+	// Valid client cert + no token → 401
+	req, _ := http.NewRequest("GET", srvURL+"/api/v1/namespaces", nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestE2E_MTLS_NoClientCert(t *testing.T) {
+	srvURL, _, _, _, caPEM := setupMTLSServer(t)
+
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: caPool,
+				// No client certificate.
+			},
+		},
+	}
+
+	// No client cert → TLS handshake error
+	req, _ := http.NewRequest("GET", srvURL+"/api/v1/namespaces", nil)
+	req.Header.Set("Authorization", "Bearer sk-mtls-token")
+	_, err := client.Do(req)
+	if err == nil {
+		t.Fatal("expected TLS handshake error, got nil")
 	}
 }
