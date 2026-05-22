@@ -49,7 +49,3 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" \
 go test ./...                    # All tests (requires age)
 go test ./e2e/ -v -count=1      # E2E tests only
 ```
-
-## License
-
-MIT
