@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/oergin/sopsgate/internal/model"
+	"github.com/oguzhane/sopsgate/internal/model"
 )
 
 func TestTokenAuth_ValidToken(t *testing.T) {

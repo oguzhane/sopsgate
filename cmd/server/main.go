@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/oergin/sopsgate/internal/api"
-	"github.com/oergin/sopsgate/internal/config"
-	"github.com/oergin/sopsgate/internal/service"
-	"github.com/oergin/sopsgate/internal/store"
+	"github.com/oguzhane/sopsgate/internal/api"
+	"github.com/oguzhane/sopsgate/internal/config"
+	"github.com/oguzhane/sopsgate/internal/service"
+	"github.com/oguzhane/sopsgate/internal/store"
 )
 
 func main() {

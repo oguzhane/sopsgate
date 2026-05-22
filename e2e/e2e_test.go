@@ -12,10 +12,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oergin/sopsgate/internal/api"
-	"github.com/oergin/sopsgate/internal/model"
-	"github.com/oergin/sopsgate/internal/service"
-	"github.com/oergin/sopsgate/internal/store"
+	"github.com/oguzhane/sopsgate/internal/api"
+	"github.com/oguzhane/sopsgate/internal/model"
+	"github.com/oguzhane/sopsgate/internal/service"
+	"github.com/oguzhane/sopsgate/internal/store"
 )
 
 func setupServer(t *testing.T) (*httptest.Server, string) {

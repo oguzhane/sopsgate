@@ -1,4 +1,4 @@
-module github.com/oergin/sopsgate
+module github.com/oguzhane/sopsgate
 
 go 1.25.0
 

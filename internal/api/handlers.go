@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/oergin/sopsgate/internal/model"
-	"github.com/oergin/sopsgate/internal/service"
+	"github.com/oguzhane/sopsgate/internal/model"
+	"github.com/oguzhane/sopsgate/internal/service"
 )
 
 // Handler holds the HTTP handlers and their dependencies.

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/oergin/sopsgate/internal/model"
+	"github.com/oguzhane/sopsgate/internal/model"
 )
 
 // Authenticator validates incoming requests.

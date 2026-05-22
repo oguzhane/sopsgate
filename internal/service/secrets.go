@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/oergin/sopsgate/internal/model"
-	"github.com/oergin/sopsgate/internal/store"
+	"github.com/oguzhane/sopsgate/internal/model"
+	"github.com/oguzhane/sopsgate/internal/store"
 )
 
 // SecretsService coordinates SOPS encryption and Git storage.

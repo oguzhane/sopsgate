@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oergin/sopsgate/internal/store"
+	"github.com/oguzhane/sopsgate/internal/store"
 )
 
 func setupService(t *testing.T) *SecretsService {

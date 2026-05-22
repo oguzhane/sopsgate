@@ -75,6 +75,7 @@ See the [`docs/`](docs/) folder for detailed documentation:
 - [Configuration](docs/configuration.md) — config file reference
 - [API Reference](docs/api-reference.md) — full endpoint documentation
 - [Architecture](docs/architecture.md) — design and internals
+- [Secrets Repo Structure](docs/secrets-repo.md) — repo layout, multi-tenant setup, importing existing SOPS files
 - [Deployment](docs/deployment.md) — production deployment guide
 
 ## Skills
