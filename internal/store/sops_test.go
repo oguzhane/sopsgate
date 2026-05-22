@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -255,6 +256,89 @@ func TestSOPSEngine_UpdateExistingFile(t *testing.T) {
 	}
 	if decrypted["key1"] != "updated" || decrypted["key2"] != "new" {
 		t.Fatalf("unexpected: %v", decrypted)
+	}
+}
+
+// TestSOPSEngine_NeverReturnsPlaintext verifies the critical security invariant:
+// every function whose output feeds into GitStore.WriteFile must return ciphertext
+// that does NOT contain any plaintext secret values. This ensures plaintext only
+// ever exists in memory and is never written to disk.
+func TestSOPSEngine_NeverReturnsPlaintext(t *testing.T) {
+	keyFile := generateAgeKey(t)
+	engine, err := NewSOPSEngine(keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Use distinct, identifiable plaintext values that would be easy to spot in ciphertext.
+	plaintexts := map[string]string{
+		"db_password": "PLAINTEXT_PASSWORD_abc123",
+		"api_key":     "PLAINTEXT_APIKEY_xyz789",
+		"token":       "PLAINTEXT_TOKEN_secret42",
+	}
+
+	assertNoCleartext := func(t *testing.T, label string, data []byte) {
+		t.Helper()
+		for key, val := range plaintexts {
+			if bytes.Contains(data, []byte(val)) {
+				t.Fatalf("[%s] plaintext value for %q found in output — security invariant violated", label, key)
+			}
+		}
+	}
+
+	// 1. EncryptMap (new file) — output must be ciphertext only.
+	encrypted, err := engine.EncryptMap(plaintexts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCleartext(t, "EncryptMap-new", encrypted)
+
+	// 2. EncryptMap (update existing) — output must be ciphertext only.
+	updated := map[string]string{
+		"db_password": "PLAINTEXT_UPDATED_newpass",
+		"api_key":     "PLAINTEXT_APIKEY_xyz789",
+		"token":       "PLAINTEXT_TOKEN_secret42",
+	}
+	reencrypted, err := engine.EncryptMap(updated, encrypted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCleartext(t, "EncryptMap-update", reencrypted)
+	if bytes.Contains(reencrypted, []byte("PLAINTEXT_UPDATED_newpass")) {
+		t.Fatal("EncryptMap-update: updated plaintext found in output")
+	}
+
+	// 3. SetSecret — output must be ciphertext only.
+	afterSet, err := engine.SetSecret(encrypted, "new_key", "PLAINTEXT_NEWKEY_val999")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCleartext(t, "SetSecret", afterSet)
+	if bytes.Contains(afterSet, []byte("PLAINTEXT_NEWKEY_val999")) {
+		t.Fatal("SetSecret: new plaintext found in output")
+	}
+
+	// 4. DeleteSecret — output must be ciphertext only (remaining secrets still encrypted).
+	afterDelete, err := engine.DeleteSecret(encrypted, "api_key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCleartext(t, "DeleteSecret", afterDelete)
+
+	// 5. CreateEmptyEncryptedFile — sanity check, should have no values at all.
+	empty, err := engine.CreateEmptyEncryptedFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCleartext(t, "CreateEmptyEncryptedFile", empty)
+
+	// 6. Verify the encrypted data is still valid by decrypting.
+	decrypted, err := engine.DecryptFile(afterSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decrypted["new_key"] != "PLAINTEXT_NEWKEY_val999" {
+		t.Fatalf("expected new_key value after decrypt, got %q", decrypted["new_key"])
 	}
 }
 
