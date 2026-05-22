@@ -26,6 +26,11 @@ sops:
   age_key_files:                # Paths to age private key files (optional if SOPS_AGE_KEY_FILE is set)
     - "/path/to/key1"
     - "/path/to/key2"           # Multiple keys for multi-tenant decryption
+  plugin:                       # Optional — age plugin support (e.g., age-plugin-yubikey)
+    path_prepend:               # Directories to prepend to $PATH for plugin binary discovery
+      - "/usr/local/bin"
+    env:                        # Additional environment variables for plugins
+      YKMAN_DEVICE: "12345678"
 ```
 
 ## Required Fields
@@ -105,3 +110,52 @@ server:
 | `server.tls.client_ca_file` | Path to CA certificate (PEM) for verifying client certificates. Requires `cert_file` and `key_file`. |
 
 All fields are optional — if omitted, SopsGate runs plain HTTP. Certificates must be generated externally (e.g., with `openssl`, `step-ca`, or `mkcert`).
+
+## Age Plugin Support
+
+SopsGate supports age plugins (e.g., `age-plugin-yubikey`) for hardware-backed key decryption. Plugins follow the standard [age plugin protocol](https://github.com/C2SP/C2SP/blob/main/age.md) — the plugin binary is executed as a subprocess for each decrypt operation.
+
+### Setup
+
+1. **Add the plugin identity to a key file.** The identity line starts with `AGE-PLUGIN-` (e.g., `AGE-PLUGIN-YUBIKEY-1...`). It can be in the same file as X25519 keys or a separate file:
+
+   ```
+   # YubiKey identity
+   AGE-PLUGIN-YUBIKEY-1QFGX3...
+   ```
+
+2. **Configure `path_prepend`** so SopsGate can find the plugin binary:
+
+   ```yaml
+   sops:
+     age_key_files:
+       - "./keys/yubikey-identity.txt"
+     plugin:
+       path_prepend:
+         - "/usr/local/bin"       # Directory containing age-plugin-yubikey
+   ```
+
+3. **Optionally set plugin-specific env vars:**
+
+   ```yaml
+   sops:
+     plugin:
+       env:
+         YKMAN_DEVICE: "12345678"   # For multi-YubiKey setups
+   ```
+
+### How It Works
+
+- At startup, `path_prepend` directories are prepended to `$PATH` and `env` values are set
+- When a secret is decrypted, SOPS loads identities from the configured key files
+- For `AGE-PLUGIN-*` identities, SOPS executes the plugin binary (e.g., `age-plugin-yubikey`)
+- The plugin handles the cryptographic operation (e.g., YubiKey touch for decryption)
+
+### Limitations
+
+| Limitation | Description |
+|-----------|-------------|
+| **Touch-only** | Only plugins that operate non-interactively (or with cached PINs) are supported. Interactive prompts (PIN entry) will fail on a headless server. |
+| **Per-request** | Each decrypt triggers a plugin execution and (for YubiKey) requires a physical touch. There is no data key caching across requests. |
+| **Timeout** | YubiKey has a ~15s hardware timeout. If touch doesn't happen, the request fails with a 500 error. |
+| **Binary required** | The plugin binary (e.g., `age-plugin-yubikey`) must be available in `$PATH` or via `path_prepend`. |

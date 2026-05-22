@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -243,5 +244,87 @@ func TestTLSConfig_MutualTLS(t *testing.T) {
 	}
 	if !(TLSConfig{CertFile: "a", KeyFile: "b", ClientCAFile: "c"}).MutualTLS() {
 		t.Fatal("all three fields should be mTLS")
+	}
+}
+
+func TestValidate_Plugin_PathPrependNonexistent(t *testing.T) {
+	cfg := Config{
+		Storage: StorageConfig{RepoPath: "/tmp"},
+		SOPS: SOPSConfig{
+			AgeKeyFiles: []string{"/tmp/k.key"},
+			Plugin:      PluginConfig{PathPrepend: []string{"/nonexistent/dir"}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for nonexistent path_prepend directory")
+	}
+}
+
+func TestValidate_Plugin_PathPrependNotDir(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "file.txt")
+	os.WriteFile(f, []byte("x"), 0644)
+
+	cfg := Config{
+		Storage: StorageConfig{RepoPath: "/tmp"},
+		SOPS: SOPSConfig{
+			AgeKeyFiles: []string{"/tmp/k.key"},
+			Plugin:      PluginConfig{PathPrepend: []string{f}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for path_prepend pointing to a file")
+	}
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("expected 'not a directory' error, got: %v", err)
+	}
+}
+
+func TestValidate_Plugin_ValidPathPrepend(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := Config{
+		Storage: StorageConfig{RepoPath: "/tmp"},
+		SOPS: SOPSConfig{
+			AgeKeyFiles: []string{"/tmp/k.key"},
+			Plugin:      PluginConfig{PathPrepend: []string{dir}},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid config, got: %v", err)
+	}
+}
+
+func TestApplyPluginEnv_PathPrepend(t *testing.T) {
+	origPath := os.Getenv("PATH")
+	defer os.Setenv("PATH", origPath)
+
+	cfg := Config{
+		SOPS: SOPSConfig{
+			Plugin: PluginConfig{PathPrepend: []string{"/opt/plugins", "/usr/local/bin"}},
+		},
+	}
+	cfg.ApplyPluginEnv()
+
+	path := os.Getenv("PATH")
+	if !strings.HasPrefix(path, "/opt/plugins"+string(os.PathListSeparator)+"/usr/local/bin") {
+		t.Fatalf("expected PATH to start with prepended dirs, got: %s", path)
+	}
+}
+
+func TestApplyPluginEnv_Env(t *testing.T) {
+	defer os.Unsetenv("TEST_PLUGIN_VAR")
+
+	cfg := Config{
+		SOPS: SOPSConfig{
+			Plugin: PluginConfig{Env: map[string]string{"TEST_PLUGIN_VAR": "hello"}},
+		},
+	}
+	cfg.ApplyPluginEnv()
+
+	if v := os.Getenv("TEST_PLUGIN_VAR"); v != "hello" {
+		t.Fatalf("expected TEST_PLUGIN_VAR=hello, got: %s", v)
 	}
 }

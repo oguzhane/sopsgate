@@ -4,6 +4,9 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -55,7 +58,16 @@ type TokenConfig struct {
 
 // SOPSConfig holds SOPS-related settings.
 type SOPSConfig struct {
-	AgeKeyFiles []string `yaml:"age_key_files"`
+	AgeKeyFiles []string     `yaml:"age_key_files"`
+	Plugin      PluginConfig `yaml:"plugin"`
+}
+
+// PluginConfig holds age plugin settings (e.g., age-plugin-yubikey).
+type PluginConfig struct {
+	// PathPrepend lists directories to prepend to $PATH for plugin binary discovery.
+	PathPrepend []string `yaml:"path_prepend"`
+	// Env holds additional environment variables for plugins (e.g., YKMAN_DEVICE).
+	Env map[string]string `yaml:"env"`
 }
 
 // Defaults returns a Config with sensible defaults.
@@ -119,6 +131,17 @@ func (c Config) Validate() error {
 		}
 	}
 
+	// Plugin validation.
+	for _, dir := range c.SOPS.Plugin.PathPrepend {
+		info, err := os.Stat(dir)
+		if err != nil {
+			return fmt.Errorf("sops.plugin.path_prepend: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("sops.plugin.path_prepend: %s is not a directory", dir)
+		}
+	}
+
 	return nil
 }
 
@@ -128,13 +151,36 @@ func (c Config) ResolveAgeKeyFiles() []string {
 	files := make([]string, 0, len(c.SOPS.AgeKeyFiles)+1)
 	files = append(files, c.SOPS.AgeKeyFiles...)
 	if envFile := os.Getenv("SOPS_AGE_KEY_FILE"); envFile != "" {
-		// Avoid duplicates.
-		for _, f := range files {
-			if f == envFile {
-				return files
-			}
+		if !slices.Contains(files, envFile) {
+			files = append(files, envFile)
 		}
-		files = append(files, envFile)
 	}
 	return files
+}
+
+// ApplyPluginEnv prepends configured directories to $PATH and sets
+// additional environment variables for age plugin support.
+func (c Config) ApplyPluginEnv() {
+	p := c.SOPS.Plugin
+	if len(p.PathPrepend) > 0 {
+		// Resolve to absolute paths — exec libraries may reject relative paths.
+		dirs := make([]string, 0, len(p.PathPrepend))
+		for _, dir := range p.PathPrepend {
+			abs, err := filepath.Abs(dir)
+			if err == nil {
+				dirs = append(dirs, abs)
+			} else {
+				dirs = append(dirs, dir)
+			}
+		}
+		prepend := strings.Join(dirs, string(os.PathListSeparator))
+		current := os.Getenv("PATH")
+		if current != "" {
+			prepend += string(os.PathListSeparator) + current
+		}
+		os.Setenv("PATH", prepend)
+	}
+	for k, v := range p.Env {
+		os.Setenv(k, v)
+	}
 }

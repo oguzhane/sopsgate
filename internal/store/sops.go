@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	sops "github.com/getsops/sops/v3"
@@ -45,7 +46,11 @@ func NewSOPSEngine(ageKeyFiles []string) (*SOPSEngine, error) {
 
 		recipients, err := parseAgeRecipients(data)
 		if err != nil {
-			return nil, fmt.Errorf("parse age recipients from %s: %w", keyFile, err)
+			// Plugin identity files (AGE-PLUGIN-*) may not have "# public key:" lines.
+			// This is expected — the plugin handles encryption via its own recipient format.
+			if !hasPluginIdentity(data) {
+				return nil, fmt.Errorf("parse age recipients from %s: %w", keyFile, err)
+			}
 		}
 		allRecipients = append(allRecipients, recipients...)
 	}
@@ -54,9 +59,24 @@ func NewSOPSEngine(ageKeyFiles []string) (*SOPSEngine, error) {
 		return nil, fmt.Errorf("no age identities found in key files")
 	}
 
-	// Set SOPS_AGE_KEY_FILE for the SOPS keyservice which reads it internally.
-	// When multiple key files are provided, set to the first one — the keyservice
-	// only needs one path, and our applyIdentities handles the rest.
+	// Set SOPS_AGE_KEY with all identity lines from all key files so the SOPS
+	// keyservice loadIdentities() path can find them. This is necessary because
+	// GetDataKey() creates fresh MasterKeys that call loadIdentities() from env
+	// vars. SOPS_AGE_KEY_FILE only supports a single file, so we use SOPS_AGE_KEY
+	// which accepts inline identity strings (newline-separated).
+	var identityLines []string
+	for _, keyFile := range ageKeyFiles {
+		data, _ := os.ReadFile(keyFile) // already read successfully above
+		for _, line := range splitLines(data) {
+			if len(line) > 0 && line[0] != '#' && line != "" {
+				identityLines = append(identityLines, line)
+			}
+		}
+	}
+	if len(identityLines) > 0 {
+		os.Setenv("SOPS_AGE_KEY", strings.Join(identityLines, "\n"))
+	}
+	// Also set SOPS_AGE_KEY_FILE for backward compat with code that reads it.
 	if len(ageKeyFiles) > 0 {
 		os.Setenv("SOPS_AGE_KEY_FILE", ageKeyFiles[0])
 	}
@@ -111,6 +131,17 @@ func parseAgeRecipients(data []byte) ([]string, error) {
 		return nil, fmt.Errorf("no age public key found in key file")
 	}
 	return recipients, nil
+}
+
+// hasPluginIdentity returns true if the data contains an AGE-PLUGIN- identity line.
+func hasPluginIdentity(data []byte) bool {
+	const prefix = "AGE-PLUGIN-"
+	for _, line := range splitLines(data) {
+		if len(line) >= len(prefix) && line[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
 }
 
 func splitLines(data []byte) []string {

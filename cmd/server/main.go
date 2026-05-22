@@ -25,6 +25,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Apply plugin environment (PATH, env vars) before SOPS init.
+	cfg.ApplyPluginEnv()
+
 	// Initialize SOPS engine.
 	ageKeyFiles := cfg.ResolveAgeKeyFiles()
 	sopsEngine, err := store.NewSOPSEngine(ageKeyFiles)

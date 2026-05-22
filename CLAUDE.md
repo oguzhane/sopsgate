@@ -24,6 +24,7 @@ docs/                       # Documentation (architecture, API reference, config
 - **SOPS as git submodule**, NOT a remote go.mod dependency. `go.mod` uses `replace github.com/getsops/sops/v3 => ./third_party/sops`
 - **net/http standard library** — no chi or third-party routers. Uses `{rest...}` catch-all wildcard with manual `parseSecretsPath()` splitting on `/keys/` delimiter for nested namespace support
 - **age encryption** — supports multiple age key files via `sops.age_key_files` config or `SOPS_AGE_KEY_FILE` env var. All identities are merged for decryption. `SOPS_AGE_KEY_FILE` is set internally for the SOPS keyservice
+- **Age plugin support** — supports age plugins (e.g., `age-plugin-yubikey`) via `sops.plugin` config. `path_prepend` prepends directories to `$PATH` for plugin binary discovery; `env` sets additional environment variables. Plugin identities (`AGE-PLUGIN-*` lines) in key files are parsed by SOPS's standard `loadIdentities()` path. Only touch-only / non-interactive plugins are supported (headless server — no terminal for PIN prompts).
 - **Standard SOPS identity management** — SopsGate does NOT introduce its own identity config. Uses `.sops.yaml` creation rules from the secrets repo for encryption recipients, and standard SOPS env vars for key files. Existing SOPS-encrypted files can be served without re-encryption
 - **go-git** for all git operations — no shelling out to git CLI
 - **Two-level locking**: per-namespace mutex in service layer + global mutex in GitStore for commit serialization
